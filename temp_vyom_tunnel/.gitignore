@@ -1,0 +1,40 @@
+# Gradle
+.gradle/
+/build/
+/*/build/
+
+# Local configuration (API Keys & SDK paths)
+local.properties
+
+# Native / JNI
+.externalNativeBuild/
+.cxx/
+*.pyc
+
+# Ensuring native binaries ARE included in the repo
+!**/jniLibs/**/*.so
+
+# IDE - IntelliJ / Android Studio
+.idea/
+*.iml
+*.iws
+.navigation/
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Private Signing Files
+*.jks
+*.keystore
+*.google-services.json
+
+# Temporary files created by our SDK during testing
+/app/cache/
+/vyom-tun-sdk/cache/
+tun.yaml
+tun.conf
+
+*.apk
+*.aar
+/app/release/

@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#F4F7F9">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- Connection Status Card -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:radius="16dp"
+            android:elevation="2dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp"
+                android:gravity="center">
+
+                <TextView
+                    android:id="@+id/tvState"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="DISCONNECTED"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:textColor="#616161"/>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="16dp"
+                    android:weightSum="2">
+
+                    <TextView
+                        android:id="@+id/tvSpeedUp"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="↑ 0 B/s"
+                        android:textAlignment="center"
+                        android:textColor="#E91E63"
+                        android:textStyle="bold"/>
+
+                    <TextView
+                        android:id="@+id/tvSpeedDown"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="↓ 0 B/s"
+                        android:textAlignment="center"
+                        android:textColor="#4CAF50"
+                        android:textStyle="bold"/>
+                </LinearLayout>
+
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- IP Info -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:radius="12dp"
+            android:elevation="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/tvIpInfo"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="IP: Not Checked"
+                    android:textColor="#424242"
+                    android:textSize="14sp"/>
+
+                <Button
+                    android:id="@+id/btnRefreshIp"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Check IP"/>
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Manual Config -->
+        <androidx.cardview.widget.CardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="12dp"
+            android:radius="12dp"
+            android:elevation="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Manual Server Builder"
+                    android:textStyle="bold"
+                    android:textColor="#212121"
+                    android:layout_marginBottom="12dp"/>
+
+                <EditText
+                    android:id="@+id/etManualHost"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="Server Address (IP/Domain)"
+                    android:inputType="textEmailAddress"/>
+
+                <EditText
+                    android:id="@+id/etManualUuid"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:hint="User UUID"/>
+
+                <Button
+                    android:id="@+id/btnBuildAndConnect"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:text="Build .. Connect"/>
+            </LinearLayout>
+        </androidx.cardview.widget.CardView>
+
+        <!-- Link / JSON -->
+        <EditText
+            android:id="@+id/etConfig"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Paste Link or JSON"
+            android:minLines="2"
+            android:inputType="textMultiLine"/>
+
+        <Button
+            android:id="@+id/btnConnect"
+            android:layout_width="match_parent"
+            android:layout_height="55dp"
+            android:layout_marginTop="12dp"
+            android:text="Connect via Link"/>
+
+        <Button
+            android:id="@+id/btnStop"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Stop VPN"
+            android:textColor="#F44336"/>
+
+        <!-- Settings -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="SDK SETTINGS"
+            android:textSize="12sp"
+            android:textColor="#757575"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swKillSwitch"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enable Kill Switch"/>
+
+        <Button
+            android:id="@+id/btnSplit"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Split Tunneling"/>
+
+        <Button
+            android:id="@+id/btnDiag"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Measure Jitter Loss"/>
+
+        <TextView
+            android:id="@+id/tvQuality"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textAlignment="center"
+            android:text="Connection Quality: --"
+            android:textSize="12sp"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swAutoStart"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Auto start VPN on device boot"/>
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/swAutoReconnect"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Reconnect VPN on network change"/>
+
+    </LinearLayout>
+</ScrollView>
