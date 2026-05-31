@@ -311,4 +311,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             .map { it.trim() }
             .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") }
     }
+
+    fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val url = java.net.URL("https://api.github.com/repos/pasnya/anarise-vpn/releases/latest")
+                val connection = url.openConnection() as java.net.HttpURLConnection
+                connection.setRequestProperty("User-Agent", "VlessVPN-App")
+                connection.connectTimeout = 5000
+                connection.readTimeout = 5000
+
+                if (connection.responseCode == 200) {
+                    val responseText = connection.inputStream.bufferedReader().use { it.readText() }
+                    val jsonObject = org.json.JSONObject(responseText)
+                    
+                    val latestTag = jsonObject.getString("tag_name").replace("v", "").trim()
+                    val currentClean = currentVersion.replace("v", "").trim()
+
+                    if (latestTag != currentClean) {
+                        val assets = jsonObject.optJSONArray("assets")
+                        val downloadUrl = if (assets != null && assets.length() > 0) {
+                            assets.getJSONObject(0).getString("browser_download_url")
+                        } else {
+                            jsonObject.getString("html_url")
+                        }
+
+                        withContext(Dispatchers.Main) {
+                            onNewVersionAvailable(latestTag, downloadUrl)
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
+    }
 }

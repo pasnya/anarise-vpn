@@ -66,6 +66,41 @@ fun DashboardScreen(
 
     var selectedTab by remember { mutableStateOf(0) }
     var showImportDialog by remember { mutableStateOf(false) }
+    var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val currentVersion = "1.0.1"
+
+    LaunchedEffect(Unit) {
+        viewModel.checkForUpdates(currentVersion) { version, url ->
+            updateInfo = Pair(version, url)
+        }
+    }
+
+    if (updateInfo != null) {
+        AlertDialog(
+            onDismissRequest = { updateInfo = null },
+            title = { Text("Доступно обновление") },
+            text = { Text("Доступна новая версия приложения: v${updateInfo?.first}. Хотите скачать её?") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(updateInfo?.second)
+                        )
+                        context.startActivity(intent)
+                        updateInfo = null
+                    }
+                ) {
+                    Text("Скачать")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { updateInfo = null }) {
+                    Text("Позже")
+                }
+            }
+        )
+    }
 
     if (showImportDialog) {
         var subUrl by remember { mutableStateOf("") }
