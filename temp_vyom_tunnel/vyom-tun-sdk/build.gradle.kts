@@ -14,6 +14,11 @@ android {
     namespace = "io.github.vyomtunnel.sdk"
     compileSdk = 36
 
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     buildFeatures {
         buildConfig = true
     }

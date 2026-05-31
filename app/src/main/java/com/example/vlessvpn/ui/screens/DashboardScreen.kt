@@ -184,56 +184,145 @@ fun DashboardScreen(
         item {
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Link input + QR Code Scanner Row
+            // Action Buttons: Paste from Clipboard & Scan QR
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                OutlinedTextField(
-                    value = vlessLink,
-                    onValueChange = { viewModel.updateVlessLink(it) },
-                    label = { Text("Вставьте ссылку (VLESS / VMess / Naive)") },
-                    modifier = Modifier.weight(1f),
-                    singleLine = true,
-                    maxLines = 1,
-                    colors = TextFieldDefaults.colors(
-                        focusedIndicatorColor = MaterialTheme.colorScheme.primary,
-                        unfocusedIndicatorColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.5f),
-                        cursorColor = MaterialTheme.colorScheme.primary,
-                        focusedContainerColor = Color.Transparent,
-                        unfocusedContainerColor = Color.Transparent
+                // Button 1: Paste from Clipboard
+                Button(
+                    onClick = {
+                        val clipboardText = clipboard.getText()?.text
+                        if (!clipboardText.isNullOrBlank()) {
+                            val trimmed = clipboardText.toString().trim()
+                            if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://")) {
+                                viewModel.updateVlessLink(trimmed)
+                                com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
+                                viewModel.loadHistory()
+                                Toast.makeText(context, "Конфигурация добавлена из буфера", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "Неподдерживаемый формат ссылки в буфере", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "Буфер обмена пуст", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
                     ),
-                    shape = RoundedCornerShape(12.dp)
-                )
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_paste),
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Вставить из буфера",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
 
+                // Button 2: Scan QR Code
                 val scanner = remember { GmsBarcodeScanning.getClient(context) }
-
-                IconButton(
+                Button(
                     onClick = {
                         scanner.startScan()
                             .addOnSuccessListener { barcode ->
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
-                                    viewModel.updateVlessLink(rawValue)
+                                    val trimmed = rawValue.trim()
+                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://")) {
+                                        viewModel.updateVlessLink(trimmed)
+                                        com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
+                                        viewModel.loadHistory()
+                                        Toast.makeText(context, "Конфигурация добавлена через QR-код", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(context, "Неподдерживаемый формат QR-кода", Toast.LENGTH_SHORT).show()
+                                    }
                                 }
                             }
                             .addOnFailureListener { e ->
-                                Toast.makeText(context, "Ошибка: ${e.message}", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, "Ошибка сканирования: ${e.message}", Toast.LENGTH_SHORT).show()
                             }
                     },
                     modifier = Modifier
-                        .size(56.dp)
-                        .background(MaterialTheme.colorScheme.primaryContainer, RoundedCornerShape(12.dp)),
-                    colors = IconButtonDefaults.iconButtonColors(
+                        .weight(1f)
+                        .height(56.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer,
                         contentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                    )
+                    ),
+                    shape = RoundedCornerShape(16.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_qr_code),
-                        contentDescription = "Сканировать QR-код",
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Сканировать QR",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Active Server Card
+            val selectedConfigLabel = if (vlessLink.isNotBlank()) {
+                getDisplayLabel(vlessLink)
+            } else {
+                "Сервер не выбран"
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_vpn_tile),
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(24.dp)
                     )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Активный сервер",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = selectedConfigLabel,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
