@@ -137,15 +137,15 @@ object HysteriaEngine {
     ): String {
         val sb = StringBuilder()
 
-        sb.appendLine("server: $server")
+        sb.appendLine("server: \"$server\"")
         sb.appendLine()
-        sb.appendLine("auth: $auth")
+        sb.appendLine("auth: \"$auth\"")
         sb.appendLine()
 
         // TLS settings
         sb.appendLine("tls:")
         if (sni.isNotEmpty()) {
-            sb.appendLine("  sni: $sni")
+            sb.appendLine("  sni: \"$sni\"")
         }
         if (insecure) {
             sb.appendLine("  insecure: true")
@@ -155,9 +155,9 @@ object HysteriaEngine {
         // Obfuscation (Salamander)
         if (obfsType.isNotEmpty() && obfsPassword.isNotEmpty()) {
             sb.appendLine("obfs:")
-            sb.appendLine("  type: $obfsType")
+            sb.appendLine("  type: \"$obfsType\"")
             sb.appendLine("  $obfsType:")
-            sb.appendLine("    password: $obfsPassword")
+            sb.appendLine("    password: \"$obfsPassword\"")
             sb.appendLine()
         }
 

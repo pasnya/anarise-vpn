@@ -67,7 +67,7 @@ fun DashboardScreen(
     var selectedTab by remember { mutableStateOf(0) }
     var showImportDialog by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
-    val currentVersion = "1.0.3"
+    val currentVersion = "1.0.4"
 
     LaunchedEffect(Unit) {
         viewModel.checkForUpdates(currentVersion) { version, url ->
@@ -253,14 +253,8 @@ fun DashboardScreen(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_paste),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Вставить из буфера",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        contentDescription = "Вставить из буфера",
+                        modifier = Modifier.size(24.dp)
                     )
                 }
 
@@ -298,14 +292,8 @@ fun DashboardScreen(
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_qr_code),
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Сканировать QR",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
+                        contentDescription = "Сканировать QR-код",
+                        modifier = Modifier.size(24.dp)
                     )
                 }
             }
@@ -516,7 +504,10 @@ fun DashboardScreen(
                         isSelected = item.trim() == vlessLink.trim(),
                         ping = ping,
                         pingLoading = pingLoad,
-                        onSelect = { viewModel.selectConfig(item) },
+                        onSelect = { 
+                            viewModel.selectConfig(item)
+                            activity?.let { viewModel.connect(it) }
+                        },
                         onDelete = { viewModel.deleteConfigFromHistory(item) },
                         onPingCheck = { viewModel.checkServerPing(item) }
                     )
