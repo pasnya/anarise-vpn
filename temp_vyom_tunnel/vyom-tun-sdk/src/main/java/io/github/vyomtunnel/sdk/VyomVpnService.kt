@@ -18,6 +18,8 @@ import android.os.ParcelFileDescriptor
 import androidx.annotation.RequiresApi
 import hev.htproxy.TProxyService
 import io.github.vyomtunnel.core.NativeEngine
+import io.github.vyomtunnel.sdk.utils.HysteriaEngine
+import io.github.vyomtunnel.sdk.utils.LinkParser
 import io.github.vyomtunnel.sdk.utils.VyomLogger
 import java.io.File
 import java.util.Timer
@@ -97,7 +99,151 @@ class VyomVpnService : TProxyService() {
         return START_STICKY
     }
 
-    private fun startVpn(xrayConfig: String) {
+    private fun startVpn(config: String) {
+        val isHysteria2 = LinkParser.isHysteria2Config(config)
+
+        if (isHysteria2) {
+            startHysteria2Vpn(config)
+        } else {
+            startXrayVpn(config)
+        }
+    }
+
+    /**
+     * Starts VPN with Hysteria2 engine.
+     * Hysteria2 binary runs as a SOCKS5 proxy on 127.0.0.1:20808.
+     */
+    private fun startHysteria2Vpn(configJson: String) {
+        val sessionName = VyomVpnManager.getCustomName(this) ?: "Vyom VPN"
+        VyomLogger.i(this, "=== START VPN (Hysteria2) ===")
+
+        thread(name = "VyomHysteria2Startup") {
+            try {
+                // Stop any existing engines
+                NativeEngine.stopXray()
+                HysteriaEngine.stop()
+                TProxyStopService()
+                Thread.sleep(500)
+
+                // Parse Hysteria2 config
+                val obj = org.json.JSONObject(configJson)
+                val server = obj.getString("server")
+                val serverHost = obj.getString("server_host")
+                val serverPort = obj.getInt("server_port")
+                val auth = obj.getString("auth")
+                val sni = obj.optString("sni", serverHost)
+                val insecure = obj.optBoolean("insecure", false)
+                val obfsType = obj.optString("obfs_type", "")
+                val obfsPassword = obj.optString("obfs_password", "")
+
+                // Start Hysteria2 engine
+                HysteriaEngine.start(
+                    context = this,
+                    server = server,
+                    auth = auth,
+                    sni = sni,
+                    insecure = insecure,
+                    obfsType = obfsType,
+                    obfsPassword = obfsPassword,
+                    logCallback = { msg ->
+                        VyomLogger.i(this, msg)
+                    }
+                )
+
+                // Give Hysteria2 time to start its SOCKS5 listener
+                Thread.sleep(1000)
+
+                VyomLogger.i(this, "Hysteria2 started, setting up TUN")
+
+                // Resolve server addresses for routing
+                val resolvedAddresses = try {
+                    java.net.InetAddress.getAllByName(serverHost).map { it.hostAddress }
+                } catch (e: Exception) {
+                    VyomLogger.e(this, "Failed to resolve server IP for $serverHost", e)
+                    emptyList<String>()
+                }
+
+                val builder = Builder()
+                    .setSession(sessionName)
+                    .addAddress("26.26.26.1", 24)
+                    .addRoute("0.0.0.0", 0)
+                    .addDnsServer("8.8.8.8")
+                    .addDisallowedApplication(packageName)
+                    .setMtu(1350)
+
+                if (resolvedAddresses.isEmpty()) {
+                    try {
+                        if (serverHost.contains(":")) {
+                            builder.addRoute(serverHost, 128)
+                        } else {
+                            builder.addRoute(serverHost, 32)
+                        }
+                    } catch (e: Exception) {
+                        VyomLogger.e(this, "Failed to add route for server fallback: $serverHost", e)
+                    }
+                } else {
+                    for (ip in resolvedAddresses) {
+                        try {
+                            if (ip.contains(":")) {
+                                builder.addRoute(ip, 128)
+                            } else {
+                                builder.addRoute(ip, 32)
+                            }
+                        } catch (e: Exception) {
+                            VyomLogger.e(this, "Failed to add route for server IP: $ip", e)
+                        }
+                    }
+                }
+
+                val excludedApps = VyomVpnManager.getExcludedApps(this)
+                for (pkg in excludedApps) {
+                    try {
+                        if (pkg != packageName) {
+                            builder.addDisallowedApplication(pkg)
+                        }
+                    } catch (e: Exception) {
+                        VyomLogger.e(this, "Failed to exclude $pkg", e)
+                    }
+                }
+
+                if (VyomVpnManager.isKillSwitchEnabled(this)) {
+                    builder.setBlocking(true)
+                }
+
+                tunInterface = builder.establish()
+                val fd = tunInterface?.fd ?: throw IllegalStateException("TUN failed")
+                VyomLogger.i(this, "TUN OK FD=$fd")
+
+                val tunFile = File(filesDir, "tun.yaml")
+                tunFile.writeText("""
+                tunnel:
+                  mtu: 1350
+                  ipv4: 26.26.26.1
+                socks5:
+                  address: 127.0.0.1
+                  port: 20808
+                  udp: udp
+                """.trimIndent())
+
+                TProxyStartService(tunFile.absolutePath, fd)
+
+                startStatsTicker()
+                notifyStatus(VyomState.CONNECTED)
+                VyomLogger.i(this, "=== VPN CONNECTED (Hysteria2) ===")
+
+            } catch (e: Exception) {
+                VyomLogger.e(this, "VPN START FAILED (Hysteria2)", e)
+                HysteriaEngine.stop()
+                notifyStatus(VyomState.ERROR)
+            }
+        }
+    }
+
+    /**
+     * Starts VPN with Xray engine (VLESS, VMess, NaiveProxy).
+     * Original implementation, unchanged.
+     */
+    private fun startXrayVpn(xrayConfig: String) {
         val assetPath = filesDir.absolutePath
         val sessionName = VyomVpnManager.getCustomName(this) ?: "Vyom VPN"
         VyomLogger.i(this, "=== START VPN ===")
@@ -213,6 +359,7 @@ class VyomVpnService : TProxyService() {
 
                 this@VyomVpnService.TProxyStopService()
                 NativeEngine.stopXray()
+                HysteriaEngine.stop()
 
                 notifyStatus(VyomState.DISCONNECTED)
                 stopSelf()
@@ -374,14 +521,30 @@ class VyomVpnService : TProxyService() {
     private fun extractServerIp(config: String): String? {
         return try {
             val obj = org.json.JSONObject(config)
+
+            // Hysteria2 config
+            if (obj.optString("_protocol") == LinkParser.PROTOCOL_HYSTERIA2) {
+                return obj.optString("server_host", null)
+            }
+
+            // Xray config
             val outbounds = obj.getJSONArray("outbounds")
 
             for (i in 0 until outbounds.length()) {
                 val outbound = outbounds.getJSONObject(i)
                 val settings = outbound.optJSONObject("settings") ?: continue
-                val vnext = settings.optJSONArray("vnext") ?: continue
-                val server = vnext.getJSONObject(0)
-                return server.getString("address")
+
+                // Try vnext (VLESS/VMess)
+                val vnext = settings.optJSONArray("vnext")
+                if (vnext != null && vnext.length() > 0) {
+                    return vnext.getJSONObject(0).getString("address")
+                }
+
+                // Try servers (HTTP/Naive)
+                val servers = settings.optJSONArray("servers")
+                if (servers != null && servers.length() > 0) {
+                    return servers.getJSONObject(0).getString("address")
+                }
             }
             null
         } catch (e: Exception) {

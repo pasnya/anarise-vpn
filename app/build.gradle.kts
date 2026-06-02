@@ -16,8 +16,8 @@ android {
         applicationId = "com.example.vlessvpn"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.3"
         ndk {
             abiFilters.add("arm64-v8a")
         }
@@ -44,6 +44,9 @@ android {
     packaging {
       resources {
         excludes += "/META-INF/{AL2.0,LGPL2.1}"
+      }
+      jniLibs {
+        useLegacyPackaging = true
       }
     }
 }

@@ -13,18 +13,80 @@ object LinkParser {
     private const val DEFAULT_PORT = 20808
     private const val DEFAULT_DNS = "8.8.8.8"
 
+    /** Marker used in the generated JSON to identify Hysteria2 configs */
+    const val PROTOCOL_HYSTERIA2 = "__hysteria2__"
+
     fun parse(link: String): String {
         return try {
             when {
                 link.startsWith("vless://") -> parseVless(link)
                 link.startsWith("vmess://") -> parseVmess(link)
                 link.startsWith("naive+https://") -> parseNaive(link)
-                else -> throw IllegalArgumentException("Unsupported protocol: Only VLESS, VMess, and NaiveProxy are supported")
+                link.startsWith("hysteria2://") || link.startsWith("hy2://") -> parseHysteria2(link)
+                else -> throw IllegalArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy and Hysteria2 are supported")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse link: $link", e)
             throw e
         }
+    }
+
+    /**
+     * Checks whether the given config JSON was generated from a Hysteria2 link.
+     */
+    fun isHysteria2Config(configJson: String): Boolean {
+        return try {
+            val obj = JSONObject(configJson)
+            obj.optString("_protocol") == PROTOCOL_HYSTERIA2
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Parses a hysteria2:// or hy2:// URI into a JSON config envelope.
+     *
+     * URI format: hysteria2://auth@host:port?sni=xxx&obfs=salamander&obfs-password=xxx&insecure=1#name
+     *
+     * The returned JSON is NOT an Xray config — it's a lightweight envelope
+     * that VyomVpnService uses to launch HysteriaEngine.
+     */
+    private fun parseHysteria2(link: String): String {
+        // Normalize hy2:// to hysteria2:// for standard URI parsing
+        val normalizedLink = if (link.startsWith("hy2://")) {
+            link.replaceFirst("hy2://", "hysteria2://")
+        } else {
+            link
+        }
+
+        val uri = Uri.parse(normalizedLink)
+        val params = uri.queryParameterNames.associateWith { uri.getQueryParameter(it).orEmpty() }
+        val auth = uri.userInfo.orEmpty().ifEmpty { params["auth"].orEmpty() }
+        val host = uri.host.orEmpty()
+        val port = if (uri.port != -1) uri.port else 443
+
+        val sni = params["sni"].orEmpty()
+        val obfsType = params["obfs"].orEmpty()
+        val obfsPassword = params["obfs-password"].orEmpty().ifEmpty { params["obfs_password"].orEmpty() }
+        val insecure = params["insecure"] == "1" || params["allowInsecure"] == "1" ||
+                params["insecure"].equals("true", ignoreCase = true) ||
+                params["allowInsecure"].equals("true", ignoreCase = true)
+
+        val config = JSONObject().apply {
+            put("_protocol", PROTOCOL_HYSTERIA2)
+            put("server", "$host:$port")
+            put("server_host", host)
+            put("server_port", port)
+            put("auth", auth)
+            put("sni", if (sni.isNotEmpty()) sni else host)
+            put("insecure", insecure)
+            if (obfsType.isNotEmpty()) {
+                put("obfs_type", obfsType)
+                put("obfs_password", obfsPassword)
+            }
+        }
+
+        return config.toString()
     }
 
     private fun parseVless(link: String): String {

@@ -67,7 +67,7 @@ fun DashboardScreen(
     var selectedTab by remember { mutableStateOf(0) }
     var showImportDialog by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
-    val currentVersion = "1.0.1"
+    val currentVersion = "1.0.3"
 
     LaunchedEffect(Unit) {
         viewModel.checkForUpdates(currentVersion) { version, url ->
@@ -110,7 +110,7 @@ fun DashboardScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Введите URL подписки с конфигурациями (VLESS / VMess / Naive):",
+                        text = "Введите URL подписки с конфигурациями (VLESS / VMess / Naive / Hysteria2):",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -230,7 +230,7 @@ fun DashboardScreen(
                         val clipboardText = clipboard.getText()?.text
                         if (!clipboardText.isNullOrBlank()) {
                             val trimmed = clipboardText.toString().trim()
-                            if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://")) {
+                            if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://")) {
                                 viewModel.updateVlessLink(trimmed)
                                 com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
                                 viewModel.loadHistory()
@@ -273,7 +273,7 @@ fun DashboardScreen(
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
                                     val trimmed = rawValue.trim()
-                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://")) {
+                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://")) {
                                         viewModel.updateVlessLink(trimmed)
                                         com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
                                         viewModel.loadHistory()

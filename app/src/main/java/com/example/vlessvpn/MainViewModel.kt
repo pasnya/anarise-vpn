@@ -272,7 +272,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val links = parseSubscriptionContent(content)
                 if (links.isEmpty()) {
                     withContext(Dispatchers.Main) {
-                        onError("Не найдено подходящих VLESS ссылок")
+                        onError("Не найдено подходящих ссылок (VLESS/VMess/Naive/Hysteria2)")
                     }
                 } else {
                     withContext(Dispatchers.Main) {
@@ -309,7 +309,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         return decoded.split(Regex("[\r\n]+"))
             .map { it.trim() }
-            .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") }
+            .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
     }
 
     fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {

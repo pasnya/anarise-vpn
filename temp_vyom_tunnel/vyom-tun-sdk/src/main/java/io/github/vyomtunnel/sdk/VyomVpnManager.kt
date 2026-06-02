@@ -177,6 +177,20 @@ object VyomVpnManager {
     }
 
     fun validateConfig(context: Context, config: String): String? {
+        if (LinkParser.isHysteria2Config(config)) {
+            return try {
+                val obj = org.json.JSONObject(config)
+                if (obj.optString("server").isNullOrBlank()) {
+                    "Hysteria2 server address is missing"
+                } else if (obj.optString("auth").isNullOrBlank()) {
+                    "Hysteria2 auth password is missing"
+                } else {
+                    null // Valid config
+                }
+            } catch (e: Exception) {
+                "Invalid Hysteria2 JSON config: ${e.message}"
+            }
+        }
         val assetPath = context.filesDir.absolutePath
         return NativeEngine.validateConfig(config, assetPath)
     }
