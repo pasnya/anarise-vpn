@@ -135,6 +135,7 @@ class VyomVpnService : TProxyService() {
                 val insecure = obj.optBoolean("insecure", false)
                 val obfsType = obj.optString("obfs_type", "")
                 val obfsPassword = obj.optString("obfs_password", "")
+                val alpn = obj.optString("alpn", "")
 
                 // Start Hysteria2 engine
                 HysteriaEngine.start(
@@ -145,6 +146,7 @@ class VyomVpnService : TProxyService() {
                     insecure = insecure,
                     obfsType = obfsType,
                     obfsPassword = obfsPassword,
+                    alpn = alpn,
                     logCallback = { msg ->
                         VyomLogger.i(this, msg)
                     }

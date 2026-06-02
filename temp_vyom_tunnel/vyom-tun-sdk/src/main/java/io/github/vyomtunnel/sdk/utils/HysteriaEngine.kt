@@ -43,6 +43,7 @@ object HysteriaEngine {
         insecure: Boolean = false,
         obfsType: String = "",
         obfsPassword: String = "",
+        alpn: String = "",
         logCallback: ((String) -> Unit)? = null
     ) {
         stop()
@@ -59,7 +60,7 @@ object HysteriaEngine {
 
         // Generate YAML config
         val configFile = File(filesDir, CONFIG_NAME)
-        val configContent = buildConfig(server, auth, sni, insecure, obfsType, obfsPassword)
+        val configContent = buildConfig(server, auth, sni, insecure, obfsType, obfsPassword, alpn)
         configFile.writeText(configContent)
 
         Log.i(TAG, "Starting Hysteria2: server=$server, obfs=$obfsType")
@@ -133,7 +134,8 @@ object HysteriaEngine {
         sni: String,
         insecure: Boolean,
         obfsType: String,
-        obfsPassword: String
+        obfsPassword: String,
+        alpn: String = ""
     ): String {
         val sb = StringBuilder()
 
@@ -149,6 +151,12 @@ object HysteriaEngine {
         }
         if (insecure) {
             sb.appendLine("  insecure: true")
+        }
+        if (alpn.isNotEmpty()) {
+            sb.appendLine("  alpn:")
+            alpn.split(",").forEach {
+                sb.appendLine("    - \"${it.trim()}\"")
+            }
         }
         sb.appendLine()
 

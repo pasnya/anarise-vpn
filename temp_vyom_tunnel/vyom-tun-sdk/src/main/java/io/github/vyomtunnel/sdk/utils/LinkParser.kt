@@ -66,11 +66,15 @@ object LinkParser {
         val port = if (uri.port != -1) uri.port else 443
 
         val sni = params["sni"].orEmpty()
-        val obfsType = params["obfs"].orEmpty()
         val obfsPassword = params["obfs-password"].orEmpty().ifEmpty { params["obfs_password"].orEmpty() }
+        var obfsType = params["obfs"].orEmpty()
+        if (obfsType.isEmpty() && obfsPassword.isNotEmpty()) {
+            obfsType = "salamander"
+        }
         val insecure = params["insecure"] == "1" || params["allowInsecure"] == "1" ||
                 params["insecure"].equals("true", ignoreCase = true) ||
                 params["allowInsecure"].equals("true", ignoreCase = true)
+        val alpn = params["alpn"].orEmpty()
 
         val config = JSONObject().apply {
             put("_protocol", PROTOCOL_HYSTERIA2)
@@ -83,6 +87,9 @@ object LinkParser {
             if (obfsType.isNotEmpty()) {
                 put("obfs_type", obfsType)
                 put("obfs_password", obfsPassword)
+            }
+            if (alpn.isNotEmpty()) {
+                put("alpn", alpn)
             }
         }
 
