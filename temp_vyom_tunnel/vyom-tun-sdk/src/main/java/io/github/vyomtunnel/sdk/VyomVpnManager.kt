@@ -13,9 +13,7 @@ import android.webkit.WebView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import io.github.vyomtunnel.core.NativeEngine
-import io.github.vyomtunnel.sdk.models.ConnectionProfiler
 import io.github.vyomtunnel.sdk.models.VyomIpInfo
-import io.github.vyomtunnel.sdk.models.VyomProfile
 import io.github.vyomtunnel.sdk.utils.AssetUtils
 import io.github.vyomtunnel.sdk.utils.LinkParser
 import io.github.vyomtunnel.sdk.utils.VyomLogger
@@ -280,9 +278,7 @@ object VyomVpnManager {
         }
     }
 
-    fun getPerformanceProfile(callback: (VyomProfile) -> Unit) {
-        ConnectionProfiler.runDiagnostics(callback = callback)
-    }
+
 
     fun setNotificationConfig(config: VyomNotificationConfig) {
         this.notificationConfig = config
