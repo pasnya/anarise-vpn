@@ -491,7 +491,7 @@ namespace Anarise
                 // Route VPN server IP directly through real gateway
                 if (!string.IsNullOrEmpty(savedServerIp) && !string.IsNullOrEmpty(savedDefaultGateway))
                 {
-                    await RunNetshAsync($"interface ip add route {savedServerIp}/32 0 {savedDefaultGateway}", ignoreError: true);
+                    await RunRouteAsync($"add {savedServerIp} mask 255.255.255.255 {savedDefaultGateway} metric 2", ignoreError: true);
                 }
 
                 // Set default route through TUN
@@ -515,7 +515,7 @@ namespace Anarise
                 // Remove routes
                 if (!string.IsNullOrEmpty(savedServerIp) && !string.IsNullOrEmpty(savedDefaultGateway))
                 {
-                    _ = RunNetshAsync($"interface ip delete route {savedServerIp}/32 0 {savedDefaultGateway}", ignoreError: true);
+                    _ = RunRouteAsync($"delete {savedServerIp}", ignoreError: true);
                 }
                 _ = RunNetshAsync("interface ip delete route 0.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
                 _ = RunNetshAsync("interface ip delete route 128.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
@@ -553,6 +553,28 @@ namespace Anarise
             catch (Exception ex)
             {
                 if (!ignoreError) LogToUi("netsh error: " + ex.Message);
+            }
+        }
+
+        private async Task RunRouteAsync(string arguments, bool ignoreError = false)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "route",
+                    Arguments = arguments,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var proc = Process.Start(psi);
+                await proc.WaitForExitAsync();
+            }
+            catch (Exception ex)
+            {
+                if (!ignoreError) LogToUi("route error: " + ex.Message);
             }
         }
 
@@ -943,14 +965,15 @@ namespace Anarise
         {
             string xrayExe = Path.Combine(binariesPath, "xray.exe");
             string hysteriaExe = Path.Combine(binariesPath, "hysteria.exe");
-
             string tun2socksExe = Path.Combine(binariesPath, "tun2socks.exe");
+            string wintunDll = Path.Combine(binariesPath, "wintun.dll");
 
             bool needsXray = !File.Exists(xrayExe) || !File.Exists(Path.Combine(binariesPath, "geoip.dat")) || !File.Exists(Path.Combine(binariesPath, "geosite.dat"));
             bool needsHysteria = !File.Exists(hysteriaExe);
             bool needsTun2Socks = !File.Exists(tun2socksExe);
+            bool needsWintun = !File.Exists(wintunDll);
 
-            if (needsXray || needsHysteria || needsTun2Socks)
+            if (needsXray || needsHysteria || needsTun2Socks || needsWintun)
             {
                 PostToUi(new { action = "downloadProgress", downloading = true, progress = 0 });
                 LogToUi("Запуск процесса загрузки недостающих модулей...");
@@ -958,7 +981,7 @@ namespace Anarise
                 try
                 {
                     // Calculate progress segments based on what needs downloading
-                    int segments = (needsXray ? 1 : 0) + (needsHysteria ? 1 : 0) + (needsTun2Socks ? 1 : 0);
+                    int segments = (needsXray ? 1 : 0) + (needsHysteria ? 1 : 0) + (needsTun2Socks ? 1 : 0) + (needsWintun ? 1 : 0);
                     int segSize = 100 / segments;
                     int pos = 0;
 
@@ -1003,6 +1026,32 @@ namespace Anarise
                         });
                         File.Delete(tunZip);
                         LogToUi("tun2socks успешно установлен.");
+                        pos += segSize;
+                    }
+
+                    if (needsWintun)
+                    {
+                        LogToUi("Загрузка Wintun (драйвер TUN)...");
+                        string wintunZip = Path.Combine(appDataPath, "wintun.zip");
+                        await DownloadFileWithProgress("https://www.wintun.net/builds/wintun-0.14.1.zip", wintunZip, pos, pos + segSize);
+                        
+                        LogToUi("Распаковка Wintun...");
+                        await Task.Run(() => {
+                            using (ZipArchive archive = ZipFile.OpenRead(wintunZip))
+                            {
+                                var entry = archive.GetEntry("wintun/bin/amd64/wintun.dll");
+                                if (entry != null)
+                                {
+                                    entry.ExtractToFile(wintunDll, true);
+                                }
+                                else
+                                {
+                                    throw new FileNotFoundException("wintun.dll not found in wintun-0.14.1.zip");
+                                }
+                            }
+                        });
+                        File.Delete(wintunZip);
+                        LogToUi("Wintun успешно установлен.");
                     }
 
                     PostToUi(new { action = "downloadProgress", downloading = false, progress = 100 });

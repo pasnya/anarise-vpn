@@ -46,6 +46,23 @@ namespace Anarise
                     }
                 }
 
+                // Delete connection setting caches to force Windows to regenerate DefaultConnectionSettings
+                try
+                {
+                    using (RegistryKey connKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections", true))
+                    {
+                        if (connKey != null)
+                        {
+                            connKey.DeleteValue("DefaultConnectionSettings", false);
+                            connKey.DeleteValue("SavedLegacySettings", false);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Failed to clear connection settings caches: " + ex.Message);
+                }
+
                 // Notify IE / Windows that settings have changed
                 NotifySystem();
             }

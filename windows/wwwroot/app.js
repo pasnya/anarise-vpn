@@ -275,7 +275,7 @@ function showUpdateDialog(version, url) {
 
 // --- CONNECTION MANAGER ---
 function toggleConnection() {
-    if (appState.vpnState === 'CONNECTED') {
+    if (appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING') {
         sendToHost('disconnect');
     } else if (appState.vpnState === 'DISCONNECTED' || appState.vpnState === 'ERROR') {
         sendToHost('connect');
