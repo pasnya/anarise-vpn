@@ -14,7 +14,8 @@ let appState = {
         bypassLan: true,
         socksPort: 20808,
         httpPort: 20809,
-        vpnMode: false
+        vpnMode: false,
+        systemProxy: true
     },
     downloadProgress: 0,
     downloading: false,
@@ -176,6 +177,11 @@ document.addEventListener('DOMContentLoaded', () => {
         const chk = document.getElementById('chk-bypass-lan');
         chk.checked = !chk.checked;
         sendToHost('saveSetting', { name: 'bypassLan', value: chk.checked });
+    });
+
+    // System proxy toggle
+    document.getElementById('chk-system-proxy').addEventListener('change', (e) => {
+        sendToHost('saveSetting', { name: 'systemProxy', value: e.target.checked });
     });
 
     // VPN mode toggle
@@ -387,6 +393,7 @@ function syncSettingsUi() {
     document.getElementById('chk-autoreconnect').checked = appState.settings.autoreconnect;
     document.getElementById('chk-bypass-lan').checked = appState.settings.bypassLan;
     document.getElementById('chk-vpn-mode').checked = appState.settings.vpnMode;
+    document.getElementById('chk-system-proxy').checked = appState.settings.systemProxy !== false;
     document.getElementById('input-socks-port').value = appState.settings.socksPort || 20808;
     document.getElementById('input-http-port').value = appState.settings.httpPort || 20809;
     updateVpnModeUi(appState.settings.vpnMode);
@@ -394,9 +401,13 @@ function syncSettingsUi() {
 
 function updateVpnModeUi(isVpn) {
     const proxyCard = document.getElementById('card-system-proxy');
+    const proxyCheckbox = document.getElementById('chk-system-proxy');
     if (proxyCard) {
         proxyCard.style.opacity = isVpn ? '0.4' : '1';
         proxyCard.style.pointerEvents = isVpn ? 'none' : 'auto';
+    }
+    if (proxyCheckbox) {
+        proxyCheckbox.disabled = isVpn;
     }
 }
 

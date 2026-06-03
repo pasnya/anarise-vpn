@@ -41,6 +41,7 @@ namespace Anarise
         private int socksPort = 20808;
         private int httpPort = 20809;
         private bool vpnMode = false;
+        private bool systemProxy = true;
         private const string AppVersion = "1.1.0";
 
         // TUN tunnel process
@@ -495,7 +496,7 @@ namespace Anarise
                         return;
                     }
                 }
-                else
+                else if (systemProxy)
                 {
                     LogToUi("Настройка системного прокси...");
                     SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
@@ -1444,6 +1445,7 @@ namespace Anarise
                     if (settings.TryGetValue("socksPort", out var valSp)) socksPort = Convert.ToInt32(valSp.ToString());
                     if (settings.TryGetValue("httpPort", out var valHp)) httpPort = Convert.ToInt32(valHp.ToString());
                     if (settings.TryGetValue("vpnMode", out var valVm)) vpnMode = Convert.ToBoolean(valVm.ToString());
+                    if (settings.TryGetValue("systemProxy", out var valSp2)) systemProxy = Convert.ToBoolean(valSp2.ToString());
                 }
                 catch { }
             }
@@ -1460,7 +1462,8 @@ namespace Anarise
                 ["bypassLan"] = bypassLan,
                 ["socksPort"] = socksPort,
                 ["httpPort"] = httpPort,
-                ["vpnMode"] = vpnMode
+                ["vpnMode"] = vpnMode,
+                ["systemProxy"] = systemProxy
             };
             File.WriteAllText(settingsFilePath, JsonSerializer.Serialize(settings));
         }
@@ -1493,7 +1496,8 @@ namespace Anarise
                 bypassLan = bypassLan,
                 socksPort = socksPort,
                 httpPort = httpPort,
-                vpnMode = vpnMode
+                vpnMode = vpnMode,
+                systemProxy = systemProxy
             };
 
             PostToUi(new { action = "updateSettings", settings = settingsObj });
@@ -1539,6 +1543,20 @@ namespace Anarise
                     break;
                 case "vpnMode":
                     vpnMode = val;
+                    break;
+                case "systemProxy":
+                    systemProxy = val;
+                    if (isConnected && !vpnMode)
+                    {
+                        if (val)
+                        {
+                            SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
+                        }
+                        else
+                        {
+                            SystemProxyManager.DisableProxy();
+                        }
+                    }
                     break;
             }
             SaveSettings();

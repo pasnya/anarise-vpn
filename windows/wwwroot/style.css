@@ -55,12 +55,14 @@ body {
     transition: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1), transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     padding: 24px;
     overflow-y: auto;
+    z-index: 1;
 }
 
 .screen.active {
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
+    z-index: 10;
 }
 
 /* SCROLLBAR STYLE */
