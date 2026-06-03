@@ -446,8 +446,18 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
         // Prevent click when deleting
         if (e.target.closest('.btn-delete-server')) return;
         
+        const isCurrent = (link.trim() === appState.selectedConfig.trim());
+        if (isCurrent && (appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING')) {
+            return; // Already connected/connecting to this server, do nothing
+        }
+
         sendToHost('selectConfig', { link });
-        if (appState.vpnState !== 'CONNECTED' && appState.vpnState !== 'CONNECTING') {
+        if (appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING') {
+            sendToHost('disconnect');
+            setTimeout(() => {
+                sendToHost('connect');
+            }, 600);
+        } else {
             sendToHost('connect');
         }
     });

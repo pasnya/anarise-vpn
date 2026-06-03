@@ -492,7 +492,7 @@ namespace Anarise
             return config.ToJsonString();
         }
 
-        private static Dictionary<string, string> ParseQueryString(string query)
+        public static Dictionary<string, string> ParseQueryString(string query)
         {
             var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (string.IsNullOrEmpty(query)) return dict;

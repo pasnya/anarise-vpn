@@ -730,12 +730,18 @@ namespace Anarise
         // --- PING TESTING ---
         private async Task<long> MeasurePingAsync(string link)
         {
-            return await Task.Run(() => {
+            return await Task.Run(async () => {
                 try
                 {
                     var uri = new Uri(link.StartsWith("vmess://") ? "http://vmess.server" : link.Replace("naive+", "").Replace("hy2://", "hysteria2://"));
                     string host = uri.Host;
                     int port = uri.Port != -1 ? uri.Port : 443;
+                    
+                    string protocol = "";
+                    if (link.StartsWith("vless://")) protocol = "vless";
+                    else if (link.StartsWith("vmess://")) protocol = "vmess";
+                    else if (link.StartsWith("naive+https://")) protocol = "naive";
+                    else if (link.StartsWith("hysteria2://") || link.StartsWith("hy2://")) protocol = "hysteria2";
 
                     if (link.StartsWith("vmess://"))
                     {
@@ -756,13 +762,62 @@ namespace Anarise
 
                     if (string.IsNullOrEmpty(host)) return -1L;
 
+                    // Determine if we should perform a TLS handshake
+                    bool useTls = false;
+                    if (protocol == "vless" || protocol == "naive")
+                    {
+                        var queryParams = LinkParser.ParseQueryString(uri.Query);
+                        queryParams.TryGetValue("security", out var security);
+                        useTls = (security != "none" && !string.IsNullOrEmpty(security)) || (protocol == "naive");
+                    }
+                    else if (protocol == "vmess")
+                    {
+                        string raw = link.Substring("vmess://".Length);
+                        int mod4 = raw.Length % 4;
+                        if (mod4 > 0) raw += new string('=', 4 - mod4);
+                        byte[] bytes = Convert.FromBase64String(raw);
+                        string jsonStr = Encoding.UTF8.GetString(bytes);
+                        var v = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr);
+                        if (v != null && v.TryGetValue("tls", out var tlsObj) && tlsObj != null)
+                        {
+                            useTls = tlsObj.ToString() != "none" && tlsObj.ToString() != "";
+                        }
+                    }
+
                     var stopwatch = Stopwatch.StartNew();
                     using (var tcpClient = new TcpClient())
                     {
+                        // Use 2.5 seconds timeout for checking, to give TLS handshake enough time
                         var connectTask = tcpClient.ConnectAsync(host, port);
-                        if (Task.WhenAny(connectTask, Task.Delay(1500)).Result == connectTask && tcpClient.Connected)
+                        if (Task.WhenAny(connectTask, Task.Delay(2500)).Result == connectTask && tcpClient.Connected)
                         {
-                            return stopwatch.ElapsedMilliseconds;
+                            if (useTls)
+                            {
+                                try
+                                {
+                                    using (var sslStream = new System.Net.Security.SslStream(
+                                        tcpClient.GetStream(), 
+                                        false, 
+                                        (sender, certificate, chain, sslPolicyErrors) => true))
+                                    {
+                                        // Authenticate with a 2.5 seconds timeout
+                                        var authTask = sslStream.AuthenticateAsClientAsync(host);
+                                        if (Task.WhenAny(authTask, Task.Delay(2500)).Result == authTask)
+                                        {
+                                            await authTask;
+                                            return stopwatch.ElapsedMilliseconds;
+                                        }
+                                    }
+                                }
+                                catch
+                                {
+                                    return -1L; // TLS handshake failed
+                                }
+                            }
+                            else
+                            {
+                                return stopwatch.ElapsedMilliseconds;
+                            }
                         }
                     }
                 }
