@@ -71,7 +71,14 @@ fun DashboardScreen(
     var selectedTab by remember { mutableStateOf(0) }
     var showImportDialog by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
-    val currentVersion = "1.0.5"
+    val currentVersion = remember {
+        try {
+            val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
+            pInfo.versionName ?: "1.1.0"
+        } catch (e: Exception) {
+            "1.1.0"
+        }
+    }
 
     LaunchedEffect(Unit) {
         viewModel.checkForUpdates(currentVersion) { version, url ->
