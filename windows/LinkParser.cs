@@ -24,14 +24,14 @@ namespace Anarise
             return false;
         }
 
-        public static string Parse(string link)
+        public static string Parse(string link, int socksPort = 20808, int httpPort = 20809)
         {
             if (link.StartsWith("vless://"))
-                return ParseVless(link);
+                return ParseVless(link, socksPort, httpPort);
             if (link.StartsWith("vmess://"))
-                return ParseVmess(link);
+                return ParseVmess(link, socksPort, httpPort);
             if (link.StartsWith("naive+https://"))
-                return ParseNaive(link);
+                return ParseNaive(link, socksPort, httpPort);
             if (link.StartsWith("hysteria2://") || link.StartsWith("hy2://"))
                 return ParseHysteria2(link);
 
@@ -115,7 +115,7 @@ namespace Anarise
             return configObj.ToJsonString();
         }
 
-        private static string ParseVless(string link)
+        private static string ParseVless(string link, int socksPort, int httpPort)
         {
             var uri = new Uri(link);
             var queryParams = ParseQueryString(uri.Query);
@@ -160,11 +160,13 @@ namespace Anarise
                 requestHost: requestHost ?? "",
                 mode: mode,
                 extra: extra ?? "",
-                allowInsecure: false
+                allowInsecure: false,
+                socksPort: socksPort,
+                httpPort: httpPort
             );
         }
 
-        private static string ParseVmess(string link)
+        private static string ParseVmess(string link, int socksPort, int httpPort)
         {
             string rawData = link.Substring("vmess://".Length);
             string jsonStr;
@@ -212,11 +214,13 @@ namespace Anarise
                 flow: "",
                 path: path,
                 headerType: type,
-                fingerprint: "chrome"
+                fingerprint: "chrome",
+                socksPort: socksPort,
+                httpPort: httpPort
             );
         }
 
-        private static string ParseNaive(string link)
+        private static string ParseNaive(string link, int socksPort, int httpPort)
         {
             var uri = new Uri(link);
             var queryParams = ParseQueryString(uri.Query);
@@ -251,7 +255,9 @@ namespace Anarise
                 sni: sni ?? "",
                 network: network,
                 flow: "",
-                allowInsecure: allowInsecure
+                allowInsecure: allowInsecure,
+                socksPort: socksPort,
+                httpPort: httpPort
             );
         }
 
@@ -272,7 +278,9 @@ namespace Anarise
             string requestHost = "",
             string mode = "auto",
             string extra = "",
-            bool allowInsecure = false)
+            bool allowInsecure = false,
+            int socksPort = 20808,
+            int httpPort = 20809)
         {
             var config = new JsonObject();
             config["log"] = new JsonObject { ["loglevel"] = "info" };
@@ -286,14 +294,13 @@ namespace Anarise
                 ["queryStrategy"] = "UseIPv4"
             };
 
-            // Inbounds: standard SOCKS5 on port 20808 AND HTTP on 20809 (for Windows system proxy)
             var inbounds = new JsonArray();
             
             // SOCKS Inbound
             var socksInbound = new JsonObject
             {
                 ["listen"] = "127.0.0.1",
-                ["port"] = 20808,
+                ["port"] = socksPort,
                 ["protocol"] = "socks",
                 ["settings"] = new JsonObject { ["udp"] = true },
                 ["sniffing"] = new JsonObject
@@ -308,7 +315,7 @@ namespace Anarise
             var httpInbound = new JsonObject
             {
                 ["listen"] = "127.0.0.1",
-                ["port"] = 20809,
+                ["port"] = httpPort,
                 ["protocol"] = "http",
                 ["settings"] = new JsonObject { ["allowTransparent"] = false },
                 ["sniffing"] = new JsonObject

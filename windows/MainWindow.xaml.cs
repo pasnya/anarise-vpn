@@ -38,6 +38,14 @@ namespace Anarise
         private bool autostart = false;
         private bool autoreconnect = true;
         private bool bypassLan = true;
+        private int socksPort = 20808;
+        private int httpPort = 20809;
+        private bool vpnMode = false;
+
+        // TUN tunnel process
+        private Process tun2socksProcess = null;
+        private string savedDefaultGateway = null;
+        private string savedServerIp = null;
 
         // Path variables
         private string appDataPath;
@@ -66,6 +74,7 @@ namespace Anarise
 
             // Clean up proxy on app close
             this.Closing += (s, e) => {
+                StopTun2Socks();
                 StopTunnelCore();
                 SystemProxyManager.DisableProxy();
             };
@@ -193,8 +202,16 @@ namespace Anarise
 
                     case "saveSetting":
                         string sName = node["name"]?.ToString();
-                        bool sVal = node["value"]?.AsValue().GetValue<bool>() ?? false;
-                        UpdateSetting(sName, sVal);
+                        if (sName == "socksPort" || sName == "httpPort")
+                        {
+                            int portVal = node["value"]?.AsValue().GetValue<int>() ?? 0;
+                            UpdatePortSetting(sName, portVal);
+                        }
+                        else
+                        {
+                            bool sVal = node["value"]?.AsValue().GetValue<bool>() ?? false;
+                            UpdateSetting(sName, sVal);
+                        }
                         break;
 
                     case "copyToClipboard":
@@ -232,7 +249,7 @@ namespace Anarise
                 string parsedConfig;
                 try
                 {
-                    parsedConfig = LinkParser.Parse(currentConfigLink);
+                    parsedConfig = LinkParser.Parse(currentConfigLink, socksPort, httpPort);
                 }
                 catch (Exception ex)
                 {
@@ -252,20 +269,22 @@ namespace Anarise
                     return;
                 }
 
+                // Extract server IP for VPN route exclusion
+                savedServerIp = ExtractServerIp(parsedConfig, isHysteria);
+
                 // Write configuration file
                 string configPath = Path.Combine(appDataPath, isHysteria ? "hysteria_config.json" : "xray_config.json");
                 
                 if (isHysteria)
                 {
-                    // Convert configuration to Hysteria2 JSON (which we listen HTTP on 20809, SOCKS5 on 20808)
                     var rawHysteriaConfig = JsonNode.Parse(parsedConfig).AsObject();
                     
                     var hysteriaConfig = new JsonObject
                     {
                         ["server"] = rawHysteriaConfig["server"]?.ToString(),
                         ["auth"] = rawHysteriaConfig["auth"]?.ToString(),
-                        ["socks5"] = new JsonObject { ["listen"] = "127.0.0.1:20808" },
-                        ["http"] = new JsonObject { ["listen"] = "127.0.0.1:20809" }
+                        ["socks5"] = new JsonObject { ["listen"] = $"127.0.0.1:{socksPort}" },
+                        ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpPort}" }
                     };
 
                     if (rawHysteriaConfig["sni"] != null)
@@ -331,9 +350,23 @@ namespace Anarise
                     return;
                 }
 
-                // Apply Windows system proxy
-                LogToUi("Настройка системного прокси...");
-                SystemProxyManager.SetProxy(true, "127.0.0.1:20809", bypassLan);
+                if (vpnMode)
+                {
+                    LogToUi("Запуск VPN-туннеля (TUN)...");
+                    bool tunStarted = await StartTun2Socks();
+                    if (!tunStarted)
+                    {
+                        LogToUi("Не удалось запустить VPN-туннель.");
+                        StopTunnelCore();
+                        PostToUi(new { action = "updateState", state = "ERROR" });
+                        return;
+                    }
+                }
+                else
+                {
+                    LogToUi("Настройка системного прокси...");
+                    SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
+                }
 
                 isConnected = true;
                 connectionStartTime = DateTime.Now;
@@ -362,6 +395,7 @@ namespace Anarise
             LogToUi("Отключение...");
 
             StopStatsTimer();
+            StopTun2Socks();
             StopTunnelCore();
             SystemProxyManager.DisableProxy();
             LogToUi("Соединение разорвано.");
@@ -382,6 +416,189 @@ namespace Anarise
                 coreProcess = null;
                 isConnected = false;
             }
+        }
+
+        // --- TUN2SOCKS VPN TUNNEL ---
+        private async Task<bool> StartTun2Socks()
+        {
+            string tun2socksExe = Path.Combine(binariesPath, "tun2socks.exe");
+            if (!File.Exists(tun2socksExe))
+            {
+                LogToUi("tun2socks.exe не найден. Запустите загрузку модулей.");
+                return false;
+            }
+
+            try
+            {
+                savedDefaultGateway = GetDefaultGateway();
+                LogToUi($"Шлюз по умолчанию: {savedDefaultGateway ?? "не определён"}");
+
+                var psi = new ProcessStartInfo
+                {
+                    FileName = tun2socksExe,
+                    Arguments = $"-device tun://anarise -proxy socks5://127.0.0.1:{socksPort}",
+                    WorkingDirectory = binariesPath,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                };
+
+                tun2socksProcess = new Process { StartInfo = psi };
+                tun2socksProcess.EnableRaisingEvents = true;
+                tun2socksProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) LogToUi("[tun] " + ev.Data); };
+                tun2socksProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) LogToUi("[tun] " + ev.Data); };
+
+                tun2socksProcess.Start();
+                tun2socksProcess.BeginOutputReadLine();
+                tun2socksProcess.BeginErrorReadLine();
+
+                // Wait for TUN adapter to initialize
+                await Task.Delay(2000);
+                if (tun2socksProcess.HasExited)
+                {
+                    LogToUi("tun2socks завершился неожиданно.");
+                    return false;
+                }
+
+                // Configure TUN adapter IP
+                await RunNetshAsync("interface ip set address \"anarise\" static 10.0.85.1 255.255.255.0");
+                await Task.Delay(500);
+
+                // Route VPN server IP directly through real gateway
+                if (!string.IsNullOrEmpty(savedServerIp) && !string.IsNullOrEmpty(savedDefaultGateway))
+                {
+                    await RunNetshAsync($"interface ip add route {savedServerIp}/32 0 {savedDefaultGateway}", ignoreError: true);
+                }
+
+                // Set default route through TUN
+                await RunNetshAsync("interface ip add route 0.0.0.0/1 \"anarise\" 10.0.85.1 metric=5", ignoreError: true);
+                await RunNetshAsync("interface ip add route 128.0.0.0/1 \"anarise\" 10.0.85.1 metric=5", ignoreError: true);
+
+                LogToUi("VPN-туннель активирован.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogToUi("Ошибка запуска tun2socks: " + ex.Message);
+                return false;
+            }
+        }
+
+        private void StopTun2Socks()
+        {
+            try
+            {
+                // Remove routes
+                if (!string.IsNullOrEmpty(savedServerIp) && !string.IsNullOrEmpty(savedDefaultGateway))
+                {
+                    _ = RunNetshAsync($"interface ip delete route {savedServerIp}/32 0 {savedDefaultGateway}", ignoreError: true);
+                }
+                _ = RunNetshAsync("interface ip delete route 0.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
+                _ = RunNetshAsync("interface ip delete route 128.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
+
+                if (tun2socksProcess != null && !tun2socksProcess.HasExited)
+                {
+                    tun2socksProcess.Kill(true);
+                }
+            }
+            catch { }
+            finally
+            {
+                tun2socksProcess = null;
+                savedServerIp = null;
+                savedDefaultGateway = null;
+            }
+        }
+
+        private async Task RunNetshAsync(string arguments, bool ignoreError = false)
+        {
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "netsh",
+                    Arguments = arguments,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var proc = Process.Start(psi);
+                await proc.WaitForExitAsync();
+            }
+            catch (Exception ex)
+            {
+                if (!ignoreError) LogToUi("netsh error: " + ex.Message);
+            }
+        }
+
+        private string GetDefaultGateway()
+        {
+            try
+            {
+                var nics = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces();
+                foreach (var nic in nics)
+                {
+                    if (nic.OperationalStatus != System.Net.NetworkInformation.OperationalStatus.Up) continue;
+                    if (nic.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback) continue;
+                    if (nic.Name.Contains("anarise", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var props = nic.GetIPProperties();
+                    foreach (var gw in props.GatewayAddresses)
+                    {
+                        if (gw.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        {
+                            return gw.Address.ToString();
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private string ExtractServerIp(string configJson, bool isHysteria)
+        {
+            try
+            {
+                var doc = JsonNode.Parse(configJson);
+                if (isHysteria)
+                {
+                    string server = doc["server_host"]?.ToString() ?? doc["server"]?.ToString();
+                    if (!string.IsNullOrEmpty(server))
+                    {
+                        // Remove port if present
+                        int colonIdx = server.LastIndexOf(':');
+                        if (colonIdx > 0) server = server.Substring(0, colonIdx);
+                        if (IPAddress.TryParse(server, out _)) return server;
+                        // Resolve hostname
+                        var addresses = Dns.GetHostAddresses(server);
+                        if (addresses.Length > 0) return addresses[0].ToString();
+                    }
+                }
+                else
+                {
+                    // Xray config: outbounds[0].settings.vnext[0].address or servers[0].address
+                    var outbounds = doc["outbounds"]?.AsArray();
+                    if (outbounds != null && outbounds.Count > 0)
+                    {
+                        var settings = outbounds[0]["settings"];
+                        string address = settings?["vnext"]?[0]?["address"]?.ToString()
+                                       ?? settings?["servers"]?[0]?["address"]?.ToString();
+                        if (!string.IsNullOrEmpty(address))
+                        {
+                            if (IPAddress.TryParse(address, out _)) return address;
+                            var addresses = Dns.GetHostAddresses(address);
+                            if (addresses.Length > 0) return addresses[0].ToString();
+                        }
+                    }
+                }
+            }
+            catch { }
+            return null;
         }
 
         // --- STATISTICS TICKER ---
@@ -706,21 +923,29 @@ namespace Anarise
             string xrayExe = Path.Combine(binariesPath, "xray.exe");
             string hysteriaExe = Path.Combine(binariesPath, "hysteria.exe");
 
+            string tun2socksExe = Path.Combine(binariesPath, "tun2socks.exe");
+
             bool needsXray = !File.Exists(xrayExe) || !File.Exists(Path.Combine(binariesPath, "geoip.dat")) || !File.Exists(Path.Combine(binariesPath, "geosite.dat"));
             bool needsHysteria = !File.Exists(hysteriaExe);
+            bool needsTun2Socks = !File.Exists(tun2socksExe);
 
-            if (needsXray || needsHysteria)
+            if (needsXray || needsHysteria || needsTun2Socks)
             {
                 PostToUi(new { action = "downloadProgress", downloading = true, progress = 0 });
-                LogToUi("Запуск процесса загрузки недостающих ядер...");
+                LogToUi("Запуск процесса загрузки недостающих модулей...");
 
                 try
                 {
+                    // Calculate progress segments based on what needs downloading
+                    int segments = (needsXray ? 1 : 0) + (needsHysteria ? 1 : 0) + (needsTun2Socks ? 1 : 0);
+                    int segSize = 100 / segments;
+                    int pos = 0;
+
                     if (needsXray)
                     {
                         LogToUi("Загрузка Xray-core...");
                         string xrayZip = Path.Combine(appDataPath, "xray.zip");
-                        await DownloadFileWithProgress("https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip", xrayZip, 0, 50);
+                        await DownloadFileWithProgress("https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip", xrayZip, pos, pos + segSize);
                         
                         LogToUi("Распаковка Xray-core...");
                         await Task.Run(() => {
@@ -728,22 +953,44 @@ namespace Anarise
                         });
                         File.Delete(xrayZip);
                         LogToUi("Xray-core успешно установлен.");
+                        pos += segSize;
                     }
 
                     if (needsHysteria)
                     {
                         LogToUi("Загрузка Hysteria2...");
-                        await DownloadFileWithProgress("https://github.com/apernet/hysteria/releases/latest/download/hysteria-windows-amd64.exe", hysteriaExe, 50, 100);
+                        await DownloadFileWithProgress("https://github.com/apernet/hysteria/releases/latest/download/hysteria-windows-amd64.exe", hysteriaExe, pos, pos + segSize);
                         LogToUi("Hysteria2 успешно установлен.");
+                        pos += segSize;
+                    }
+
+                    if (needsTun2Socks)
+                    {
+                        LogToUi("Загрузка tun2socks (VPN-туннель)...");
+                        string tunZip = Path.Combine(appDataPath, "tun2socks.zip");
+                        await DownloadFileWithProgress("https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-windows-amd64.zip", tunZip, pos, pos + segSize);
+                        
+                        LogToUi("Распаковка tun2socks...");
+                        await Task.Run(() => {
+                            ZipFile.ExtractToDirectory(tunZip, binariesPath, true);
+                            // Rename to consistent name
+                            string extracted = Path.Combine(binariesPath, "tun2socks-windows-amd64.exe");
+                            if (File.Exists(extracted) && !File.Exists(tun2socksExe))
+                            {
+                                File.Move(extracted, tun2socksExe);
+                            }
+                        });
+                        File.Delete(tunZip);
+                        LogToUi("tun2socks успешно установлен.");
                     }
 
                     PostToUi(new { action = "downloadProgress", downloading = false, progress = 100 });
-                    LogToUi("Установка ядер полностью завершена!");
+                    LogToUi("Установка модулей полностью завершена!");
                 }
                 catch (Exception ex)
                 {
                     LogToUi("Ошибка скачивания файлов: " + ex.Message);
-                    MessageBox.Show("Ошибка скачивания модулей Xray/Hysteria2:\n" + ex.Message, "Ошибка");
+                    MessageBox.Show("Ошибка скачивания модулей:\n" + ex.Message, "Ошибка");
                     PostToUi(new { action = "downloadProgress", downloading = false, progress = 0 });
                 }
             }
@@ -800,6 +1047,9 @@ namespace Anarise
                     if (settings.TryGetValue("autostart", out var valAs)) autostart = Convert.ToBoolean(valAs.ToString());
                     if (settings.TryGetValue("autoreconnect", out var valAr)) autoreconnect = Convert.ToBoolean(valAr.ToString());
                     if (settings.TryGetValue("bypassLan", out var valBl)) bypassLan = Convert.ToBoolean(valBl.ToString());
+                    if (settings.TryGetValue("socksPort", out var valSp)) socksPort = Convert.ToInt32(valSp.ToString());
+                    if (settings.TryGetValue("httpPort", out var valHp)) httpPort = Convert.ToInt32(valHp.ToString());
+                    if (settings.TryGetValue("vpnMode", out var valVm)) vpnMode = Convert.ToBoolean(valVm.ToString());
                 }
                 catch { }
             }
@@ -813,7 +1063,10 @@ namespace Anarise
                 ["killSwitch"] = killSwitch,
                 ["autostart"] = autostart,
                 ["autoreconnect"] = autoreconnect,
-                ["bypassLan"] = bypassLan
+                ["bypassLan"] = bypassLan,
+                ["socksPort"] = socksPort,
+                ["httpPort"] = httpPort,
+                ["vpnMode"] = vpnMode
             };
             File.WriteAllText(settingsFilePath, JsonSerializer.Serialize(settings));
         }
@@ -843,7 +1096,10 @@ namespace Anarise
                 killSwitch = killSwitch,
                 autostart = autostart,
                 autoreconnect = autoreconnect,
-                bypassLan = bypassLan
+                bypassLan = bypassLan,
+                socksPort = socksPort,
+                httpPort = httpPort,
+                vpnMode = vpnMode
             };
 
             PostToUi(new { action = "updateSettings", settings = settingsObj });
@@ -870,12 +1126,25 @@ namespace Anarise
                     break;
                 case "bypassLan":
                     bypassLan = val;
-                    // If connected, apply new bypass immediately
-                    if (isConnected)
+                    if (isConnected && !vpnMode)
                     {
-                        SystemProxyManager.SetProxy(true, "127.0.0.1:20809", bypassLan);
+                        SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
                     }
                     break;
+                case "vpnMode":
+                    vpnMode = val;
+                    break;
+            }
+            SaveSettings();
+        }
+
+        private void UpdatePortSetting(string name, int val)
+        {
+            if (val < 1 || val > 65535) return;
+            switch (name)
+            {
+                case "socksPort": socksPort = val; break;
+                case "httpPort": httpPort = val; break;
             }
             SaveSettings();
         }

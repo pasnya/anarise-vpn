@@ -683,6 +683,41 @@ body {
     line-height: 1.4;
 }
 
+.settings-section-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--color-primary);
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    padding: 4px 0 0;
+    opacity: 0.7;
+}
+
+.setting-input {
+    width: 80px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--color-text-primary);
+    padding: 8px 12px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: center;
+    outline: none;
+    transition: border-color 0.2s;
+    -moz-appearance: textfield;
+}
+
+.setting-input::-webkit-outer-spin-button,
+.setting-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.setting-input:focus {
+    border-color: var(--color-primary);
+}
+
 /* TOGGLE SWITCH */
 .toggle-switch {
     position: relative;

@@ -169,10 +169,23 @@
             </header>
 
             <div class="settings-list">
+                <div class="settings-section-title">Режим подключения</div>
+
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">System Proxy / Системный прокси</span>
-                        <span class="setting-desc">Автоматически настраивать прокси в Windows для всех программ при подключении</span>
+                        <span class="setting-title">VPN-туннель (TUN)</span>
+                        <span class="setting-desc">Направлять весь системный трафик через VPN. Требуются права администратора</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-vpn-mode">
+                        <label for="chk-vpn-mode"></label>
+                    </div>
+                </div>
+
+                <div class="setting-card" id="card-system-proxy">
+                    <div class="setting-info">
+                        <span class="setting-title">Системный прокси</span>
+                        <span class="setting-desc">Автоматически настраивать прокси в Windows при подключении</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-system-proxy" checked disabled>
@@ -180,10 +193,30 @@
                     </div>
                 </div>
 
+                <div class="settings-section-title">Порты прокси</div>
+
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">SOCKS5 порт</span>
+                        <span class="setting-desc">Локальный порт SOCKS5 прокси</span>
+                    </div>
+                    <input type="number" id="input-socks-port" class="setting-input" value="20808" min="1" max="65535">
+                </div>
+
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">HTTP порт</span>
+                        <span class="setting-desc">Локальный порт HTTP прокси</span>
+                    </div>
+                    <input type="number" id="input-http-port" class="setting-input" value="20809" min="1" max="65535">
+                </div>
+
+                <div class="settings-section-title">Основные</div>
+
                 <div class="setting-card">
                     <div class="setting-info">
                         <span class="setting-title">Kill Switch</span>
-                        <span class="setting-desc">Блокировать интернет при случайном обрыве прокси/VPN соединения</span>
+                        <span class="setting-desc">Блокировать интернет при обрыве VPN соединения</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-kill-switch">

@@ -11,7 +11,10 @@ let appState = {
         killSwitch: false,
         autostart: false,
         autoreconnect: true,
-        bypassLan: true
+        bypassLan: true,
+        socksPort: 20808,
+        httpPort: 20809,
+        vpnMode: false
     },
     downloadProgress: 0,
     downloading: false,
@@ -170,6 +173,27 @@ document.addEventListener('DOMContentLoaded', () => {
         const chk = document.getElementById('chk-bypass-lan');
         chk.checked = !chk.checked;
         sendToHost('saveSetting', { name: 'bypassLan', value: chk.checked });
+    });
+
+    // VPN mode toggle
+    document.getElementById('chk-vpn-mode').addEventListener('change', (e) => {
+        sendToHost('saveSetting', { name: 'vpnMode', value: e.target.checked });
+        // Visually indicate system proxy is disabled when VPN mode is on
+        updateVpnModeUi(e.target.checked);
+    });
+
+    // Port inputs (save on blur to avoid excessive messages)
+    document.getElementById('input-socks-port').addEventListener('change', (e) => {
+        const val = parseInt(e.target.value);
+        if (val >= 1 && val <= 65535) {
+            sendToHost('saveSetting', { name: 'socksPort', value: val });
+        }
+    });
+    document.getElementById('input-http-port').addEventListener('change', (e) => {
+        const val = parseInt(e.target.value);
+        if (val >= 1 && val <= 65535) {
+            sendToHost('saveSetting', { name: 'httpPort', value: val });
+        }
     });
 
     // Request initial state from host
@@ -336,6 +360,18 @@ function syncSettingsUi() {
     document.getElementById('chk-autostart').checked = appState.settings.autostart;
     document.getElementById('chk-autoreconnect').checked = appState.settings.autoreconnect;
     document.getElementById('chk-bypass-lan').checked = appState.settings.bypassLan;
+    document.getElementById('chk-vpn-mode').checked = appState.settings.vpnMode;
+    document.getElementById('input-socks-port').value = appState.settings.socksPort || 20808;
+    document.getElementById('input-http-port').value = appState.settings.httpPort || 20809;
+    updateVpnModeUi(appState.settings.vpnMode);
+}
+
+function updateVpnModeUi(isVpn) {
+    const proxyCard = document.getElementById('card-system-proxy');
+    if (proxyCard) {
+        proxyCard.style.opacity = isVpn ? '0.4' : '1';
+        proxyCard.style.pointerEvents = isVpn ? 'none' : 'auto';
+    }
 }
 
 // --- RENDER LISTS ---
