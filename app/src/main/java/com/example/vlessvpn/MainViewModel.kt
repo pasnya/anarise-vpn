@@ -366,6 +366,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val allLinks = content.split(Regex("[\r\n]+"))
                     .map { it.trim() }
                     .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
+                    .distinct()
                 
                 if (allLinks.isEmpty()) {
                     _externalStatusText.value = "Конфигурации не найдены"
