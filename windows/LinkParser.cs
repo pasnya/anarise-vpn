@@ -14,7 +14,7 @@ namespace Anarise
         {
             try
             {
-                var doc = JsonDocument.Parse(configJson);
+                using var doc = JsonDocument.Parse(configJson);
                 if (doc.RootElement.TryGetProperty("_protocol", out var protoProp))
                 {
                     return protoProp.GetString() == PROTOCOL_HYSTERIA2;

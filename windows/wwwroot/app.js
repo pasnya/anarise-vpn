@@ -585,6 +585,12 @@ function appendLogLine(line) {
     lineDiv.className = 'log-line';
     lineDiv.innerText = line;
     view.appendChild(lineDiv);
+
+    // Remove excess DOM nodes to match array limit
+    while (view.children.length > 300) {
+        view.removeChild(view.firstChild);
+    }
+
     view.scrollTop = view.scrollHeight;
 }
 

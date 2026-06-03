@@ -556,6 +556,7 @@ namespace Anarise
                 {
                     coreProcess = null;
                 }
+                proc?.Dispose();
                 isConnected = false;
             }
         }
@@ -657,6 +658,7 @@ namespace Anarise
                 {
                     tun2socksProcess = null;
                 }
+                proc?.Dispose();
                 savedServerIp = null;
                 savedDefaultGateway = null;
             }
@@ -688,6 +690,10 @@ namespace Anarise
                             }
                         }
                         catch { }
+                        finally
+                        {
+                            proc.Dispose();
+                        }
                     }
                 }
             }
@@ -906,11 +912,11 @@ namespace Anarise
                 client.Timeout = TimeSpan.FromSeconds(5);
                 try
                 {
-                    var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={hostname}&type=A");
+                    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={hostname}&type=A");
                     request.Headers.Accept.Clear();
                     request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/dns-json"));
                     
-                    var response = await client.SendAsync(request);
+                    using var response = await client.SendAsync(request);
                     if (response.IsSuccessStatusCode)
                     {
                         var json = await response.Content.ReadAsStringAsync();
@@ -948,11 +954,11 @@ namespace Anarise
                 client.Timeout = TimeSpan.FromSeconds(5);
                 try
                 {
-                    var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={hostname}&type=A");
+                    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={hostname}&type=A");
                     request.Headers.Accept.Clear();
                     request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
                     
-                    var response = await client.SendAsync(request);
+                    using var response = await client.SendAsync(request);
                     if (response.IsSuccessStatusCode)
                     {
                         var json = await response.Content.ReadAsStringAsync();
@@ -1610,7 +1616,7 @@ namespace Anarise
                         client.DefaultRequestHeaders.UserAgent.ParseAdd("AnariseVPN-WindowsClient");
                         client.Timeout = TimeSpan.FromSeconds(10);
                         
-                        var response = await client.GetAsync("https://api.github.com/repos/pasnya/anarise-vpn/releases/latest");
+                        using var response = await client.GetAsync("https://api.github.com/repos/pasnya/anarise-vpn/releases/latest");
                         if (response.IsSuccessStatusCode)
                         {
                             string jsonString = await response.Content.ReadAsStringAsync();
