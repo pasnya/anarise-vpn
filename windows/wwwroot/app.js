@@ -103,6 +103,9 @@ function handleHostMessage(msg) {
         case 'showToast':
             alert(msg.message); // Simple native alert for feedback
             break;
+        case 'updateAvailable':
+            showUpdateDialog(msg.version, msg.url);
+            break;
     }
 }
 
@@ -196,6 +199,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Update dialog buttons
+    document.getElementById('btn-update-cancel').addEventListener('click', () => {
+        document.getElementById('dialog-update').classList.add('hidden');
+    });
+
     // Request initial state from host
     sendToHost('appReady');
 });
@@ -245,6 +253,24 @@ function openImportDialog() {
 function closeImportDialog() {
     const dialog = document.getElementById('dialog-overlay-import') || document.getElementById('dialog-import');
     dialog.classList.add('hidden');
+}
+
+function showUpdateDialog(version, url) {
+    const dialog = document.getElementById('dialog-update');
+    if (dialog) {
+        document.getElementById('update-dialog-text').innerText = `Доступна новая версия приложения: v${version}. Хотите скачать её?`;
+        
+        const downloadBtn = document.getElementById('btn-update-download');
+        const newDownloadBtn = downloadBtn.cloneNode(true);
+        downloadBtn.parentNode.replaceChild(newDownloadBtn, downloadBtn);
+        
+        newDownloadBtn.addEventListener('click', () => {
+            sendToHost('openBrowser', { url: url });
+            dialog.classList.add('hidden');
+        });
+        
+        dialog.classList.remove('hidden');
+    }
 }
 
 // --- CONNECTION MANAGER ---

@@ -41,6 +41,7 @@ namespace Anarise
         private int socksPort = 20808;
         private int httpPort = 20809;
         private bool vpnMode = false;
+        private const string AppVersion = "1.1.0";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -143,6 +144,7 @@ namespace Anarise
                     case "appReady":
                         await SyncSettingsAndHistory();
                         CheckAndDownloadBinaries();
+                        CheckForUpdates();
                         break;
 
                     case "pasteFromClipboard":
@@ -220,6 +222,25 @@ namespace Anarise
                         {
                             Clipboard.SetText(copyText);
                             PostToUi(new { action = "showToast", message = "Скопировано в буфер обмена" });
+                        }
+                        break;
+
+                    case "openBrowser":
+                        string openUrl = node["url"]?.ToString();
+                        if (!string.IsNullOrEmpty(openUrl))
+                        {
+                            try
+                            {
+                                Process.Start(new ProcessStartInfo
+                                {
+                                    FileName = openUrl,
+                                    UseShellExecute = true
+                                });
+                            }
+                            catch (Exception ex)
+                            {
+                                LogToUi("Ошибка открытия браузера: " + ex.Message);
+                            }
                         }
                         break;
                 }
@@ -1173,6 +1194,60 @@ namespace Anarise
             {
                 LogToUi("Ошибка установки автозапуска: " + ex.Message);
             }
+        }
+
+        private void CheckForUpdates()
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using (HttpClient client = new HttpClient())
+                    {
+                        client.DefaultRequestHeaders.UserAgent.ParseAdd("AnariseVPN-WindowsClient");
+                        client.Timeout = TimeSpan.FromSeconds(10);
+                        
+                        var response = await client.GetAsync("https://api.github.com/repos/pasnya/anarise-vpn/releases/latest");
+                        if (response.IsSuccessStatusCode)
+                        {
+                            string jsonString = await response.Content.ReadAsStringAsync();
+                            var jsonNode = JsonNode.Parse(jsonString);
+                            if (jsonNode != null)
+                            {
+                                string latestTag = jsonNode["tag_name"]?.ToString().Replace("v", "").Trim() ?? "";
+                                string currentClean = AppVersion.Replace("v", "").Trim();
+                                
+                                if (latestTag != currentClean && !string.IsNullOrEmpty(latestTag))
+                                {
+                                    string downloadUrl = jsonNode["html_url"]?.ToString() ?? "https://github.com/pasnya/anarise-vpn/releases/latest";
+                                    var assets = jsonNode["assets"]?.AsArray();
+                                    if (assets != null && assets.Count > 0)
+                                    {
+                                        var winAsset = assets.FirstOrDefault(a => a != null && (a["name"]?.ToString().Contains("Windows") == true || a["name"]?.ToString().Contains("zip") == true));
+                                        if (winAsset != null)
+                                        {
+                                            downloadUrl = winAsset["browser_download_url"]?.ToString() ?? downloadUrl;
+                                        }
+                                        else
+                                        {
+                                            downloadUrl = assets[0]?["browser_download_url"]?.ToString() ?? downloadUrl;
+                                        }
+                                    }
+
+                                    await Dispatcher.InvokeAsync(() =>
+                                    {
+                                        PostToUi(new { action = "updateAvailable", version = latestTag, url = downloadUrl });
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine("Update check failed: " + ex.Message);
+                }
+            });
         }
 
         // --- WEBVIEW2 COMMUNICATION UTILS ---
