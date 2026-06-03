@@ -442,9 +442,22 @@ function renderExternalConfigs() {
 function createServerCard(link, isSelected, ping, loading, showDelete = true) {
     const card = document.createElement('div');
     card.className = 'server-card' + (isSelected ? ' selected' : '');
+    
+    let startX = 0;
+    let startY = 0;
+
+    card.addEventListener('pointerdown', (e) => {
+        startX = e.clientX;
+        startY = e.clientY;
+    });
+
     card.addEventListener('click', (e) => {
         // Prevent click when deleting
         if (e.target.closest('.btn-delete-server')) return;
+        
+        // Ignore click if the user was dragging/scrolling (moved more than 8 pixels)
+        const dist = Math.sqrt(Math.pow(e.clientX - startX, 2) + Math.pow(e.clientY - startY, 2));
+        if (dist > 8) return;
         
         const isCurrent = (link.trim() === appState.selectedConfig.trim());
         if (isCurrent && (appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING')) {

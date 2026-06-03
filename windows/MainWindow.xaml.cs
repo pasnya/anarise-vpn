@@ -47,12 +47,14 @@ namespace Anarise
         private Process tun2socksProcess = null;
         private string savedDefaultGateway = null;
         private string savedServerIp = null;
+        private int connectionGeneration = 0;
 
         // Path variables
         private string appDataPath;
         private string binariesPath;
         private string configHistoryPath;
         private string settingsFilePath;
+        private string externalCachePath;
 
         public MainWindow()
         {
@@ -63,6 +65,7 @@ namespace Anarise
             binariesPath = Path.Combine(appDataPath, "binaries");
             configHistoryPath = Path.Combine(appDataPath, "history.json");
             settingsFilePath = Path.Combine(appDataPath, "settings.json");
+            externalCachePath = Path.Combine(appDataPath, "external_cache.json");
 
             Directory.CreateDirectory(appDataPath);
             Directory.CreateDirectory(binariesPath);
@@ -260,12 +263,17 @@ namespace Anarise
                 return;
             }
 
+            int gen = System.Threading.Interlocked.Increment(ref connectionGeneration);
+
             PostToUi(new { action = "updateState", state = "CONNECTING" });
             LogToUi("Инициализация подключения...");
 
             try
             {
                 StopTunnelCore();
+                StopTun2Socks();
+
+                if (gen != connectionGeneration) return;
 
                 string parsedConfig;
                 try
@@ -275,9 +283,11 @@ namespace Anarise
                 catch (Exception ex)
                 {
                     LogToUi("Ошибка парсинга конфигурации: " + ex.Message);
-                    PostToUi(new { action = "updateState", state = "ERROR" });
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
                     return;
                 }
+
+                if (gen != connectionGeneration) return;
 
                 bool isHysteria = LinkParser.IsHysteria2Config(parsedConfig);
                 string executable = isHysteria ? "hysteria.exe" : "xray.exe";
@@ -286,12 +296,14 @@ namespace Anarise
                 if (!File.Exists(exePath))
                 {
                     LogToUi($"Критическая ошибка: файл ядра {executable} не найден по пути {exePath}");
-                    PostToUi(new { action = "updateState", state = "ERROR" });
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
                     return;
                 }
 
                 // Extract server IP for VPN route exclusion
                 savedServerIp = ExtractServerIp(parsedConfig, isHysteria);
+
+                if (gen != connectionGeneration) return;
 
                 // Write configuration file
                 string configPath = Path.Combine(appDataPath, isHysteria ? "hysteria_config.json" : "xray_config.json");
@@ -336,6 +348,8 @@ namespace Anarise
                     File.WriteAllText(configPath, parsedConfig);
                 }
 
+                if (gen != connectionGeneration) return;
+
                 // Start process
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
@@ -364,6 +378,8 @@ namespace Anarise
 
                 // Wait 1.5 seconds to verify if process is still running
                 await Task.Delay(1500);
+                if (gen != connectionGeneration) return;
+
                 if (coreProcess.HasExited)
                 {
                     LogToUi("Процесс ядра неожиданно завершился.");
@@ -375,6 +391,8 @@ namespace Anarise
                 {
                     LogToUi("Запуск VPN-туннеля (TUN)...");
                     bool tunStarted = await StartTun2Socks();
+                    if (gen != connectionGeneration) return;
+
                     if (!tunStarted)
                     {
                         LogToUi("Не удалось запустить VPN-туннель.");
@@ -388,6 +406,8 @@ namespace Anarise
                     LogToUi("Настройка системного прокси...");
                     SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
                 }
+
+                if (gen != connectionGeneration) return;
 
                 isConnected = true;
                 connectionStartTime = DateTime.Now;
@@ -406,12 +426,13 @@ namespace Anarise
             catch (Exception ex)
             {
                 LogToUi("Ошибка запуска подключения: " + ex.Message);
-                PostToUi(new { action = "updateState", state = "ERROR" });
+                if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
             }
         }
 
         private void StopConnection()
         {
+            System.Threading.Interlocked.Increment(ref connectionGeneration);
             PostToUi(new { action = "updateState", state = "DISCONNECTED" });
             LogToUi("Отключение...");
 
@@ -424,17 +445,22 @@ namespace Anarise
 
         private void StopTunnelCore()
         {
+            var proc = coreProcess;
             try
             {
-                if (coreProcess != null && !coreProcess.HasExited)
+                if (proc != null && !proc.HasExited)
                 {
-                    coreProcess.Kill(true);
+                    proc.Kill(true);
+                    proc.WaitForExit(3000);
                 }
             }
             catch { }
             finally
             {
-                coreProcess = null;
+                if (coreProcess == proc)
+                {
+                    coreProcess = null;
+                }
                 isConnected = false;
             }
         }
@@ -510,6 +536,7 @@ namespace Anarise
 
         private void StopTun2Socks()
         {
+            var proc = tun2socksProcess;
             try
             {
                 // Remove routes
@@ -520,15 +547,19 @@ namespace Anarise
                 _ = RunNetshAsync("interface ip delete route 0.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
                 _ = RunNetshAsync("interface ip delete route 128.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
 
-                if (tun2socksProcess != null && !tun2socksProcess.HasExited)
+                if (proc != null && !proc.HasExited)
                 {
-                    tun2socksProcess.Kill(true);
+                    proc.Kill(true);
+                    proc.WaitForExit(3000);
                 }
             }
             catch { }
             finally
             {
-                tun2socksProcess = null;
+                if (tun2socksProcess == proc)
+                {
+                    tun2socksProcess = null;
+                }
                 savedServerIp = null;
                 savedDefaultGateway = null;
             }
@@ -901,6 +932,15 @@ namespace Anarise
                         .OrderBy(c => c.latency)
                         .ToList();
 
+                    if (sortedConfigs.Count > 0)
+                    {
+                        try
+                        {
+                            File.WriteAllText(externalCachePath, JsonSerializer.Serialize(sortedConfigs));
+                        }
+                        catch { }
+                    }
+
                     PostToUi(new { action = "updateExternalConfigs", configs = sortedConfigs });
                     PostToUi(new { action = "updateExternalStatus", statusText = sortedConfigs.Count > 0 ? $"Найдено рабочих: {sortedConfigs.Count}" : "Нет доступных рабочих серверов" });
                 }
@@ -1230,6 +1270,18 @@ namespace Anarise
             PostToUi(new { action = "updateSettings", settings = settingsObj });
             PostToUi(new { action = "updateHistory", history = configHistory });
             PostToUi(new { action = "updateSelectedConfig", link = currentConfigLink });
+
+            // Load and send cached public/external configs if they exist
+            if (File.Exists(externalCachePath))
+            {
+                try
+                {
+                    string json = File.ReadAllText(externalCachePath);
+                    var cachedNode = JsonNode.Parse(json);
+                    PostToUi(new { action = "updateExternalConfigs", configs = cachedNode });
+                }
+                catch { }
+            }
             
             // Wait brief moment and load status
             PostToUi(new { action = "updateState", state = isConnected ? "CONNECTED" : "DISCONNECTED" });
