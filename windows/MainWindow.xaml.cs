@@ -70,6 +70,8 @@ namespace Anarise
             Directory.CreateDirectory(appDataPath);
             Directory.CreateDirectory(binariesPath);
 
+            KillOrphanedProcesses();
+
             LoadSettings();
             LoadHistory();
 
@@ -272,6 +274,7 @@ namespace Anarise
             {
                 StopTunnelCore();
                 StopTun2Socks();
+                KillOrphanedProcesses();
 
                 if (gen != connectionGeneration) return;
 
@@ -332,6 +335,14 @@ namespace Anarise
                     try
                     {
                         var xrayConfig = JsonNode.Parse(parsedConfig).AsObject();
+                        
+                        // Force warning log level in Xray config to save CPU/memory and reduce log spam
+                        if (xrayConfig["log"] == null)
+                        {
+                            xrayConfig["log"] = new JsonObject();
+                        }
+                        xrayConfig["log"]!.AsObject()["loglevel"] = "warning";
+
                         var outbounds = xrayConfig["outbounds"]?.AsArray();
                         if (outbounds != null && outbounds.Count > 0)
                         {
@@ -397,7 +408,8 @@ namespace Anarise
                         ["server"] = rawHysteriaConfig["server"]?.ToString(),
                         ["auth"] = rawHysteriaConfig["auth"]?.ToString(),
                         ["socks5"] = new JsonObject { ["listen"] = $"127.0.0.1:{socksPort}" },
-                        ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpPort}" }
+                        ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpPort}" },
+                        ["logger"] = new JsonObject { ["level"] = "warn" }
                     };
 
                     if (rawHysteriaConfig["sni"] != null)
@@ -443,6 +455,8 @@ namespace Anarise
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
+                psi.Environment["GOMEMLIMIT"] = "50MiB";
+                psi.Environment["GOGC"] = "30";
 
                 coreProcess = new Process { StartInfo = psi };
                 coreProcess.EnableRaisingEvents = true;
@@ -563,7 +577,7 @@ namespace Anarise
                 var psi = new ProcessStartInfo
                 {
                     FileName = tun2socksExe,
-                    Arguments = $"-device tun://anarise -proxy socks5://127.0.0.1:{socksPort}",
+                    Arguments = $"-device tun://anarise -proxy socks5://127.0.0.1:{socksPort} -loglevel warn",
                     WorkingDirectory = binariesPath,
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -572,6 +586,8 @@ namespace Anarise
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
+                psi.Environment["GOMEMLIMIT"] = "30MiB";
+                psi.Environment["GOGC"] = "30";
 
                 tun2socksProcess = new Process { StartInfo = psi };
                 tun2socksProcess.EnableRaisingEvents = true;
@@ -643,6 +659,38 @@ namespace Anarise
                 savedServerIp = null;
                 savedDefaultGateway = null;
             }
+        }
+
+        private void KillOrphanedProcesses()
+        {
+            try
+            {
+                string[] processNames = { "xray", "tun2socks", "hysteria" };
+                foreach (var name in processNames)
+                {
+                    foreach (var proc in Process.GetProcessesByName(name))
+                    {
+                        try
+                        {
+                            string? mainModulePath = null;
+                            try
+                            {
+                                mainModulePath = proc.MainModule?.FileName;
+                            }
+                            catch { }
+
+                            // If we could read the path and it is in our binaries path, kill it
+                            if (mainModulePath != null && mainModulePath.StartsWith(binariesPath, StringComparison.OrdinalIgnoreCase))
+                            {
+                                proc.Kill(true);
+                                proc.WaitForExit(2000);
+                            }
+                        }
+                        catch { }
+                    }
+                }
+            }
+            catch { }
         }
 
         private async Task RunNetshAsync(string arguments, bool ignoreError = false)
