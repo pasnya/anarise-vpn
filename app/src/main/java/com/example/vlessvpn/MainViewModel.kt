@@ -346,4 +346,79 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
+
+    private val _externalConfigs = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
+    val externalConfigs: StateFlow<List<Pair<String, Long>>> = _externalConfigs.asStateFlow()
+
+    private val _externalLoading = MutableStateFlow(false)
+    val externalLoading: StateFlow<Boolean> = _externalLoading.asStateFlow()
+
+    private val _externalStatusText = MutableStateFlow("")
+    val externalStatusText: StateFlow<String> = _externalStatusText.asStateFlow()
+
+    fun fetchAndCheckExternalConfigs() {
+        if (_externalLoading.value) return
+        _externalLoading.value = true
+        _externalStatusText.value = "Загрузка списка..."
+        viewModelScope.launch {
+            try {
+                val content = fetchSubscriptionContent("https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt")
+                val allLinks = content.split(Regex("[\r\n]+"))
+                    .map { it.trim() }
+                    .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
+                
+                if (allLinks.isEmpty()) {
+                    _externalStatusText.value = "Конфигурации не найдены"
+                    _externalConfigs.value = emptyList()
+                    _externalLoading.value = false
+                    return@launch
+                }
+
+                _externalStatusText.value = "Проверка серверов (0/${allLinks.size})..."
+                
+                val checkedConfigs = mutableListOf<Pair<String, Long>>()
+                val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
+                
+                val dispatcher = Dispatchers.IO
+                val semaphore = kotlinx.coroutines.sync.Semaphore(30)
+                
+                coroutineScope {
+                    val jobs = allLinks.map { link ->
+                        async(dispatcher) {
+                            semaphore.acquire()
+                            try {
+                                val hostPort = parseHostPort(link)
+                                val latency = if (hostPort != null) {
+                                    runTcpPing(hostPort.first, hostPort.second)
+                                } else {
+                                    -1L
+                                }
+                                val count = completedCount.incrementAndGet()
+                                if (count % 5 == 0 || count == allLinks.size) {
+                                    _externalStatusText.value = "Проверка серверов ($count/${allLinks.size})..."
+                                }
+                                if (latency >= 0) {
+                                    synchronized(checkedConfigs) {
+                                        checkedConfigs.add(Pair(link, latency))
+                                    }
+                                }
+                            } finally {
+                                semaphore.release()
+                            }
+                        }
+                    }
+                    jobs.awaitAll()
+                }
+                
+                val working = checkedConfigs.sortedBy { it.second }
+                _externalConfigs.value = working
+                _externalStatusText.value = if (working.isEmpty()) "Нет рабочих серверов" else "Найдено рабочих: ${working.size}"
+            } catch (e: Exception) {
+                _externalStatusText.value = "Ошибка: ${e.message}"
+            } finally {
+                _externalLoading.value = false
+            }
+        }
+    }
 }
+

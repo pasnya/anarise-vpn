@@ -57,6 +57,10 @@ fun DashboardScreen(
     val pingLoading by viewModel.pingLoading.collectAsState()
     val isImporting by viewModel.isImporting.collectAsState()
 
+    val externalConfigs by viewModel.externalConfigs.collectAsState()
+    val externalLoading by viewModel.externalLoading.collectAsState()
+    val externalStatusText by viewModel.externalStatusText.collectAsState()
+
     @Suppress("DEPRECATION")
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
@@ -72,6 +76,12 @@ fun DashboardScreen(
     LaunchedEffect(Unit) {
         viewModel.checkForUpdates(currentVersion) { version, url ->
             updateInfo = Pair(version, url)
+        }
+    }
+
+    LaunchedEffect(selectedTab) {
+        if (selectedTab == 1 && externalConfigs.isEmpty() && !externalLoading) {
+            viewModel.fetchAndCheckExternalConfigs()
         }
     }
 
@@ -419,7 +429,7 @@ fun DashboardScreen(
         item {
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Tabs container (Servers History & Logs)
+            // Tabs container (Servers History, External & Logs)
             PrimaryTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = Color.Transparent,
@@ -434,6 +444,11 @@ fun DashboardScreen(
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
+                    text = { Text("Внешние", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
+                )
+                Tab(
+                    selected = selectedTab == 2,
+                    onClick = { selectedTab = 2 },
                     text = { Text("Логи", fontWeight = FontWeight.Bold, fontSize = 14.sp) }
                 )
             }
@@ -509,6 +524,95 @@ fun DashboardScreen(
                             activity?.let { viewModel.connect(it) }
                         },
                         onDelete = { viewModel.deleteConfigFromHistory(item) },
+                        onPingCheck = { viewModel.checkServerPing(item) }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+            }
+        } else if (selectedTab == 1) {
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Внешние списки",
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                    IconButton(
+                        onClick = { viewModel.fetchAndCheckExternalConfigs() },
+                        enabled = !externalLoading
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Обновить списки",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+
+            if (externalLoading || externalStatusText.startsWith("Загрузка") || externalStatusText.startsWith("Проверка")) {
+                item {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(36.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = externalStatusText,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            } else if (externalConfigs.isEmpty()) {
+                item {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(150.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = externalStatusText.ifBlank { "Список пуст" },
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            } else {
+                item {
+                    Text(
+                        text = externalStatusText,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontSize = 12.sp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    )
+                }
+                items(externalConfigs) { (item, ping) ->
+                    ServerCard(
+                        displayName = getDisplayLabel(item),
+                        link = item,
+                        isSelected = item.trim() == vlessLink.trim(),
+                        ping = ping,
+                        pingLoading = false,
+                        onSelect = { 
+                            viewModel.selectConfig(item)
+                            activity?.let { viewModel.connect(it) }
+                        },
+                        onDelete = null,
                         onPingCheck = { viewModel.checkServerPing(item) }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
