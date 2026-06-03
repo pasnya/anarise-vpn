@@ -300,6 +300,86 @@ namespace Anarise
                     return;
                 }
 
+                // Resolve server domain to IP using DoH
+                if (isHysteria)
+                {
+                    try
+                    {
+                        var rawHysteriaConfig = JsonNode.Parse(parsedConfig).AsObject();
+                        string host = rawHysteriaConfig["server_host"]?.ToString();
+                        string port = rawHysteriaConfig["server_port"]?.ToString();
+                        
+                        if (!string.IsNullOrEmpty(host))
+                        {
+                            string resolvedIp = await ResolveDohAsync(host);
+                            if (gen != connectionGeneration) return;
+                            
+                            rawHysteriaConfig["server"] = $"{resolvedIp}:{port}";
+                            if (rawHysteriaConfig["sni"] == null || string.IsNullOrEmpty(rawHysteriaConfig["sni"].ToString()))
+                            {
+                                rawHysteriaConfig["sni"] = host;
+                            }
+                            parsedConfig = rawHysteriaConfig.ToJsonString();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogToUi("Ошибка разрешения DNS для Hysteria: " + ex.Message);
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        var xrayConfig = JsonNode.Parse(parsedConfig).AsObject();
+                        var outbounds = xrayConfig["outbounds"]?.AsArray();
+                        if (outbounds != null && outbounds.Count > 0)
+                        {
+                            var proxyOutbound = outbounds[0]?.AsObject();
+                            if (proxyOutbound != null)
+                            {
+                                var settings = proxyOutbound["settings"]?.AsObject();
+                                if (settings != null)
+                                {
+                                    // VLESS/VMess use vnext
+                                    if (settings["vnext"] != null && settings["vnext"]?.AsArray().Count > 0)
+                                    {
+                                        var vnextObj = settings["vnext"]?[0]?.AsObject();
+                                        if (vnextObj != null && vnextObj["address"] != null)
+                                        {
+                                            string host = vnextObj["address"]?.ToString();
+                                            string resolvedIp = await ResolveDohAsync(host);
+                                            if (gen != connectionGeneration) return;
+                                            
+                                            vnextObj["address"] = resolvedIp;
+                                        }
+                                    }
+                                    // NaiveProxy/Trojan/Shadowsocks use servers
+                                    else if (settings["servers"] != null && settings["servers"]?.AsArray().Count > 0)
+                                    {
+                                        var serverObj = settings["servers"]?[0]?.AsObject();
+                                        if (serverObj != null && serverObj["address"] != null)
+                                        {
+                                            string host = serverObj["address"]?.ToString();
+                                            string resolvedIp = await ResolveDohAsync(host);
+                                            if (gen != connectionGeneration) return;
+                                            
+                                            serverObj["address"] = resolvedIp;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        parsedConfig = xrayConfig.ToJsonString();
+                    }
+                    catch (Exception ex)
+                    {
+                        LogToUi("Ошибка разрешения DNS для Xray: " + ex.Message);
+                    }
+                }
+
+                if (gen != connectionGeneration) return;
+
                 // Extract server IP for VPN route exclusion
                 savedServerIp = ExtractServerIp(parsedConfig, isHysteria);
 
@@ -756,6 +836,107 @@ namespace Anarise
                     LogToUi("Не удалось получить информацию об IP: " + ex.Message);
                 }
             }
+        }
+
+        // --- DNS OVER HTTPS (DoH) RESOLUTION ---
+        private async Task<string> ResolveDohAsync(string hostname)
+        {
+            if (string.IsNullOrEmpty(hostname)) return hostname;
+
+            // If it's already an IP address, return it immediately
+            if (IPAddress.TryParse(hostname, out _))
+            {
+                return hostname;
+            }
+
+            LogToUi($"Разрешение адреса {hostname} через DoH...");
+
+            // Try Cloudflare DoH (1.1.1.1) first
+            using (var client = new HttpClient())
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+                try
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={hostname}&type=A");
+                    request.Headers.Accept.Clear();
+                    request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/dns-json"));
+                    
+                    var response = await client.SendAsync(request);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(json);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("Answer", out var answerProp) && answerProp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var element in answerProp.EnumerateArray())
+                            {
+                                if (element.TryGetProperty("type", out var typeProp) && typeProp.GetInt32() == 1) // Type A
+                                {
+                                    if (element.TryGetProperty("data", out var dataProp))
+                                    {
+                                        string ip = dataProp.GetString() ?? "";
+                                        if (IPAddress.TryParse(ip, out _))
+                                        {
+                                            LogToUi($"Адрес {hostname} разрешён: {ip}");
+                                            return ip;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogToUi($"DoH ошибка разрешения для {hostname}: {ex.Message}. Переход к резервному серверу.");
+                }
+            }
+
+            // Fallback to Google DoH (8.8.8.8)
+            using (var client = new HttpClient())
+            {
+                client.Timeout = TimeSpan.FromSeconds(5);
+                try
+                {
+                    var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={hostname}&type=A");
+                    request.Headers.Accept.Clear();
+                    request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                    
+                    var response = await client.SendAsync(request);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var json = await response.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(json);
+                        var root = doc.RootElement;
+                        if (root.TryGetProperty("Answer", out var answerProp) && answerProp.ValueKind == JsonValueKind.Array)
+                        {
+                            foreach (var element in answerProp.EnumerateArray())
+                            {
+                                if (element.TryGetProperty("type", out var typeProp) && typeProp.GetInt32() == 1) // Type A
+                                {
+                                    if (element.TryGetProperty("data", out var dataProp))
+                                    {
+                                        string ip = dataProp.GetString() ?? "";
+                                        if (IPAddress.TryParse(ip, out _))
+                                        {
+                                            LogToUi($"Адрес {hostname} разрешён через Google DoH: {ip}");
+                                            return ip;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    LogToUi($"Google DoH ошибка разрешения для {hostname}: {ex.Message}");
+                }
+            }
+
+            LogToUi($"Не удалось разрешить {hostname} через DoH. Используется оригинальный хост.");
+            return hostname;
         }
 
         // --- PING TESTING ---

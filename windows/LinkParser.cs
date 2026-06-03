@@ -288,6 +288,8 @@ namespace Anarise
             config["dns"] = new JsonObject
             {
                 ["servers"] = new JsonArray(
+                    "https://1.1.1.1/dns-query",
+                    "https://8.8.8.8/dns-query",
                     protocol == "http" ? "tcp://1.1.1.1" : "1.1.1.1",
                     protocol == "http" ? "tcp://8.8.8.8" : "8.8.8.8"
                 ),
