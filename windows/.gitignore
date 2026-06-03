@@ -1,0 +1,23 @@
+## Ignore Visual Studio & .NET build artifacts
+bin/
+obj/
+[Bb]in/
+[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+## WebView2 profile data
+wwwroot/webview_profile/
+webview_profile/
+*.log
+
+## User configuration overrides (local settings)
+history.json
+settings.json
+config_history.json
+xray_config.json
+hysteria_config.json
+binaries/

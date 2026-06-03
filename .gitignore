@@ -1,15 +1,53 @@
+## IDEs and editors
+.idea/
+.vscode/
 *.iml
-.gradle
-/local.properties
-/.idea/caches
-/.idea/libraries
-/.idea/modules.xml
-/.idea/workspace.xml
-/.idea/navEditor.xml
-/.idea/assetWizardSettings.xml
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
 .DS_Store
-/build
-/captures
+
+## Android build outputs and local configuration
+.gradle/
+build/
+local.properties
 .externalNativeBuild
 .cxx
-local.properties
+captures/
+android/.gradle/
+android/build/
+android/local.properties
+android/app/build/
+android/temp_vyom_tunnel/vyom-tun-sdk/.cxx/
+android/temp_vyom_tunnel/vyom-tun-sdk/build/
+
+## Windows build outputs and WebView2 profile data
+[Bb]in/
+[Oo]bj/
+bin/
+obj/
+.vs/
+windows/bin/
+windows/obj/
+windows/.vs/
+windows/wwwroot/webview_profile/
+windows/webview_profile/
+webview_profile/
+
+## Logs
+*.log
+
+## Windows app local settings and cached configs
+windows/history.json
+windows/settings.json
+windows/config_history.json
+windows/xray_config.json
+windows/hysteria_config.json
+windows/binaries/
+history.json
+settings.json
+config_history.json
+xray_config.json
+hysteria_config.json
+binaries/

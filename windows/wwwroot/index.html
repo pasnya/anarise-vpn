@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANARISE VPN</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app" class="app-container">
+        
+        <!-- MAIN DASHBOARD SCREEN -->
+        <div id="screen-main" class="screen active">
+            <!-- Header -->
+            <header class="header">
+                <div class="logo-area">
+                    <img src="logo.png" alt="Logo" class="logo-img">
+                    <h1 class="brand-name">ANARISE</h1>
+                </div>
+                <button id="btn-settings" class="icon-btn" title="Настройки">
+                    <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.13,5.91,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.43-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+                    </svg>
+                </button>
+            </header>
+
+            <!-- Status Indicator -->
+            <div class="status-container">
+                <span id="status-label" class="status-text disconnected">Отключено</span>
+            </div>
+
+            <!-- Paste & QR/Import Actions -->
+            <div class="action-row">
+                <button id="btn-paste" class="action-btn" title="Вставить из буфера обмена">
+                    <svg viewBox="0 0 24 24" width="22" height="22">
+                        <path fill="currentColor" d="M19,2h-4.18C14.4,0.84,13.3,0,12,0S9.6,0.84,9.18,2H5C3.9,2,3,2.9,3,4v16c0,1.1,0.9,2,2,2h14c1.1,0,2-0.9,2-2V4 C21,2.9,20.1,2,19,2z M12,2c0.55,0,1,0.45,1,1s-0.45,1-1,1s-1-0.45-1-1S11.45,3,12,3z M19,20H5V4h2v3h10V4h2V20z"/>
+                    </svg>
+                    <span>Буфер</span>
+                </button>
+                <button id="btn-import-sub" class="action-btn" title="Импортировать подписку по ссылке">
+                    <svg viewBox="0 0 24 24" width="22" height="22">
+                        <path fill="currentColor" d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-1 11h-2v2h-2v-2h-2v-2h2v-2h2v2h2v2z"/>
+                    </svg>
+                    <span>Подписка</span>
+                </button>
+            </div>
+
+            <!-- Selected Server Card -->
+            <div class="active-server-card">
+                <div class="card-icon">
+                    <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M12,2C6.48,2,2,6.48,2,12s4.48,10,10,10s10-4.48,10-10S17.52,2,12,2z M11,19.93C7.05,19.44,4,16.08,4,12 c0-0.43,0.04-0.85,0.11-1.27L9,15v2c0,1.1,0.9,2,2,2V19.93z M17.9,17.4c-0.26-0.81-1-1.4-1.9-1.4h-1v-3c0-0.55-0.45-1-1-1H9V9H8 V7h2V5.5C10,4.67,10.67,4,11.5,4S13,4.67,13,5.5V8h3c1.1,0,2,0.9,2,2v1.78C18.61,12.78,19,13.84,19,15 C19,15.9,18.59,16.71,17.9,17.4z"/>
+                    </svg>
+                </div>
+                <div class="card-details">
+                    <span class="card-title">Активный сервер</span>
+                    <span id="active-server-name" class="card-value">Сервер не выбран</span>
+                </div>
+            </div>
+
+            <!-- Connect Toggle Button -->
+            <div class="connect-button-container">
+                <button id="btn-connect" class="connect-btn">Подключиться</button>
+            </div>
+
+            <!-- Exit IP Card (Visible only when connected) -->
+            <div id="exit-ip-card" class="exit-ip-card hidden">
+                <div class="exit-ip-header">
+                    <span class="flag-icon" id="exit-ip-flag">🌐</span>
+                    <span class="ip-address" id="exit-ip-addr">127.0.0.1</span>
+                </div>
+                <div class="exit-ip-location" id="exit-ip-loc">Загрузка информации об IP...</div>
+            </div>
+
+            <!-- Stats grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="stat-title">Отдача</span>
+                    <span id="stat-upload-speed" class="stat-value">0 B/s</span>
+                    <div id="stat-total-upload-container" class="stat-sub hidden">
+                        <span>Всего:</span> <span id="stat-total-upload">0 B</span>
+                    </div>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-title">Загрузка</span>
+                    <span id="stat-download-speed" class="stat-value">0 B/s</span>
+                    <div id="stat-total-download-container" class="stat-sub hidden">
+                        <span>Всего:</span> <span id="stat-total-download">0 B</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="connection-duration-card" class="stat-card duration-card hidden">
+                <span class="stat-title">Время подключения</span>
+                <span id="stat-duration" class="stat-value">00:00:00</span>
+            </div>
+
+            <!-- Tabs Navigation -->
+            <div class="tab-row">
+                <button class="tab-btn active" data-tab="tab-servers">Серверы</button>
+                <button class="tab-btn" data-tab="tab-external">Внешние</button>
+                <button class="tab-btn" data-tab="tab-logs">Логи</button>
+            </div>
+
+            <!-- Tab Contents -->
+            <div class="tab-content-container">
+                <!-- Servers List Tab -->
+                <div id="tab-servers" class="tab-pane active">
+                    <div class="tab-header">
+                        <h3>Список серверов</h3>
+                        <div class="header-actions">
+                            <button id="btn-refresh-pings" class="icon-btn-small" title="Проверить все пинги">
+                                <svg viewBox="0 0 24 24" width="18" height="18">
+                                    <path fill="currentColor" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08 c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="servers-list" class="servers-list">
+                        <!-- Server cards added here dynamically -->
+                        <div class="empty-state">Список серверов пуст</div>
+                    </div>
+                </div>
+
+                <!-- External Lists Tab -->
+                <div id="tab-external" class="tab-pane">
+                    <div class="tab-header">
+                        <h3>Внешние списки</h3>
+                        <div class="header-actions">
+                            <button id="btn-refresh-external" class="icon-btn-small" title="Обновить списки">
+                                <svg viewBox="0 0 24 24" width="18" height="18">
+                                    <path fill="currentColor" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08 c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div id="external-status" class="status-info">Загрузка внешних серверов...</div>
+                    <div id="external-list" class="servers-list">
+                        <!-- External Server cards added here dynamically -->
+                    </div>
+                </div>
+
+                <!-- Logs Tab -->
+                <div id="tab-logs" class="tab-pane">
+                    <div class="tab-header">
+                        <h3>Логи соединения</h3>
+                        <div class="header-actions">
+                            <button id="btn-copy-logs" class="text-link-btn">Копировать</button>
+                        </div>
+                    </div>
+                    <div id="logs-view" class="logs-view">
+                        <div class="log-line empty">Логи отсутствуют</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SETTINGS SCREEN -->
+        <div id="screen-settings" class="screen">
+            <header class="header">
+                <button id="btn-settings-back" class="icon-btn" title="Назад">
+                    <svg viewBox="0 0 24 24" width="24" height="24">
+                        <path fill="currentColor" d="M20,11H7.83l5.59-5.59L12,4l-8,8l8,8l1.41-1.41L7.83,13H20V11z"/>
+                    </svg>
+                </button>
+                <h1 class="brand-name">Настройки</h1>
+                <div style="width: 40px;"></div> <!-- Spacer -->
+            </header>
+
+            <div class="settings-list">
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">System Proxy / Системный прокси</span>
+                        <span class="setting-desc">Автоматически настраивать прокси в Windows для всех программ при подключении</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-system-proxy" checked disabled>
+                        <label for="chk-system-proxy"></label>
+                    </div>
+                </div>
+
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">Kill Switch</span>
+                        <span class="setting-desc">Блокировать интернет при случайном обрыве прокси/VPN соединения</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-kill-switch">
+                        <label for="chk-kill-switch"></label>
+                    </div>
+                </div>
+
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">Автостарт при загрузке</span>
+                        <span class="setting-desc">Запускать ANARISE автоматически при запуске Windows</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-autostart">
+                        <label for="chk-autostart"></label>
+                    </div>
+                </div>
+
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">Авто-переподключение</span>
+                        <span class="setting-desc">Автоматически переподключаться при обрыве связи</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-autoreconnect" checked>
+                        <label for="chk-autoreconnect"></label>
+                    </div>
+                </div>
+
+                <div class="setting-card-clickable" id="btn-split-tunnel">
+                    <div class="setting-info">
+                        <span class="setting-title">Обход локальной сети (Bypass LAN)</span>
+                        <span class="setting-desc">Пускать трафик локальных сетей напрямую, минуя прокси</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-bypass-lan" checked>
+                        <label for="chk-bypass-lan"></label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DOWNLOAD PROGRESS OVERLAY -->
+        <div id="overlay-download" class="overlay hidden">
+            <div class="overlay-card">
+                <div class="logo-area-overlay">
+                    <img src="logo.png" alt="Logo" class="logo-img-large">
+                    <h2>Установка модулей</h2>
+                </div>
+                <p id="download-status-text">Загрузка ядер Xray и Hysteria2...</p>
+                <div class="progress-bar-container">
+                    <div id="download-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
+                </div>
+                <span id="download-percentage">0%</span>
+            </div>
+        </div>
+
+        <!-- DIALOGS -->
+        <!-- Import Subscription Dialog -->
+        <div id="dialog-import" class="dialog-overlay hidden">
+            <div class="dialog-card">
+                <h3>Импорт подписки</h3>
+                <p class="dialog-desc">Введите URL подписки с конфигурациями (VLESS / VMess / Naive / Hysteria2):</p>
+                <input type="text" id="input-sub-url" class="dialog-input" placeholder="https://example.com/sub.txt">
+                <div class="dialog-actions">
+                    <button id="btn-dialog-cancel" class="dialog-btn text-btn">Отмена</button>
+                    <button id="btn-dialog-import" class="dialog-btn fill-btn" disabled>Импорт</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
