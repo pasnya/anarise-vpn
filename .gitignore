@@ -51,3 +51,8 @@ config_history.json
 xray_config.json
 hysteria_config.json
 binaries/
+external_cache.json
+
+## Compiled binaries and archives
+*.apk
+*.zip

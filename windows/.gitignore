@@ -21,3 +21,4 @@ config_history.json
 xray_config.json
 hysteria_config.json
 binaries/
+external_cache.json
