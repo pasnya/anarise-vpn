@@ -214,7 +214,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val hostPort = parseHostPort(link)
             val latency = if (hostPort != null) {
-                runTcpPing(hostPort.first, hostPort.second)
+                runFullPing(link, hostPort.first, hostPort.second)
             } else {
                 -1L
             }
@@ -225,36 +225,102 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun parseHostPort(link: String): Pair<String, Int>? {
         try {
-            val uri = android.net.Uri.parse(link)
-            val host = uri.host
-            val port = uri.port
-            if (!host.isNullOrBlank() && port != -1) {
-                return Pair(host, port)
+            val trimmed = link.trim()
+            val normalizedLink = if (trimmed.startsWith("hy2://")) {
+                "hysteria2://" + trimmed.substring(6)
+            } else {
+                trimmed
             }
-            val atIndex = link.indexOf('@')
-            val questionIndex = link.indexOf('?')
-            val hashIndex = link.indexOf('#')
-            val endIndex = listOf(questionIndex, hashIndex, link.length).filter { it != -1 }.minOrNull() ?: link.length
-            if (atIndex != -1 && atIndex < endIndex) {
-                val hostPortStr = link.substring(atIndex + 1, endIndex)
-                val parts = hostPortStr.split(':')
-                if (parts.size >= 2) {
-                    val host = parts[0]
-                    val port = parts[1].toIntOrNull() ?: 443
-                    return Pair(host, port)
-                }
+
+            val authority = normalizedLink
+                .substringAfter("://")
+                .substringBefore("?")
+                .substringBefore("#")
+
+            val hostPort = if (authority.contains("@")) {
+                authority.substringAfterLast("@")
+            } else {
+                authority
+            }
+
+            if (hostPort.isBlank()) return null
+
+            val host = if (hostPort.startsWith("[")) {
+                hostPort.substringBeforeLast("]").removePrefix("[")
+            } else if (hostPort.contains(":")) {
+                hostPort.substringBeforeLast(":")
+            } else {
+                hostPort
+            }
+
+            val port = if (hostPort.contains(":") && !hostPort.endsWith("]")) {
+                hostPort.substringAfterLast(":").toIntOrNull() ?: 443
+            } else {
+                443
+            }
+
+            if (host.isNotBlank()) {
+                return Pair(host, port)
             }
         } catch (e: Exception) {}
         return null
     }
 
-    private suspend fun runTcpPing(host: String, port: Int): Long = withContext(Dispatchers.IO) {
+    /**
+     * Determine whether a TLS handshake is needed to properly verify the server.
+     */
+    private fun determineTlsNeeded(link: String): Boolean {
+        try {
+            when {
+                link.startsWith("vless://") -> {
+                    val uri = android.net.Uri.parse(link)
+                    val security = uri.getQueryParameter("security") ?: "none"
+                    return security != "none" && security.isNotEmpty()
+                }
+                link.startsWith("naive+https://") -> return true
+                // Hysteria2 uses QUIC/UDP, TCP check is sufficient
+                link.startsWith("hysteria2://") || link.startsWith("hy2://") -> return false
+            }
+        } catch (e: Exception) {}
+        return false
+    }
+
+    /**
+     * Full ping check: TCP connect + optional TLS handshake.
+     * Timeout: 2.5s (matching Windows version).
+     */
+    private suspend fun runFullPing(link: String, host: String, port: Int): Long = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
         try {
             val socket = java.net.Socket()
-            socket.connect(java.net.InetSocketAddress(host, port), 1500)
-            socket.close()
-            System.currentTimeMillis() - start
+            socket.connect(java.net.InetSocketAddress(host, port), 2500)
+
+            val needsTls = determineTlsNeeded(link)
+            if (needsTls) {
+                try {
+                    val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
+                    // Trust all certs for ping check (same approach as Windows version)
+                    sslContext.init(null, arrayOf(object : javax.net.ssl.X509TrustManager {
+                        override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>?, authType: String?) {}
+                        override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>?, authType: String?) {}
+                        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
+                    }), null)
+
+                    val sslSocket = sslContext.socketFactory.createSocket(socket, host, port, true) as javax.net.ssl.SSLSocket
+                    sslSocket.soTimeout = 2500
+                    sslSocket.startHandshake()
+                    val elapsed = System.currentTimeMillis() - start
+                    sslSocket.close()
+                    elapsed
+                } catch (e: Exception) {
+                    try { socket.close() } catch (_: Exception) {}
+                    -1L // TLS handshake failed
+                }
+            } else {
+                val elapsed = System.currentTimeMillis() - start
+                socket.close()
+                elapsed
+            }
         } catch (e: Exception) {
             -1L
         }
@@ -272,15 +338,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val links = parseSubscriptionContent(content)
                 if (links.isEmpty()) {
                     withContext(Dispatchers.Main) {
-                        onError("Не найдено подходящих ссылок (VLESS/VMess/Naive/Hysteria2)")
+                        onError("Не найдено подходящих ссылок (VLESS/Naive/Hysteria2)")
                     }
                 } else {
                     withContext(Dispatchers.Main) {
+                        var addedCount = 0
                         links.forEach { link ->
-                            ConfigHistoryManager.saveConfigToHistory(context, link)
+                            val duplicate = ConfigHistoryManager.findDuplicate(context, link)
+                            if (duplicate == null) {
+                                ConfigHistoryManager.saveConfigToHistory(context, link)
+                                addedCount++
+                            }
                         }
                         loadHistory()
-                        onComplete(links.size)
+                        if (addedCount > 0) {
+                            onComplete(addedCount)
+                        } else {
+                            onError("Все конфигурации уже есть в списке")
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -309,7 +384,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
         return decoded.split(Regex("[\r\n]+"))
             .map { it.trim() }
-            .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
+            .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
     }
 
     fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {
@@ -356,26 +431,64 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _externalStatusText = MutableStateFlow("")
     val externalStatusText: StateFlow<String> = _externalStatusText.asStateFlow()
 
+    private val externalSourceUrls = listOf(
+        "https://github.com/Epodonios/v2ray-configs/raw/main/Splitted-By-Protocol/vless.txt",
+        "https://raw.githubusercontent.com/V2RayRoot/V2RayConfig/refs/heads/main/Config/vless.txt",
+        "https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt",
+        "https://github.com/skywrt/v2ray-configs/raw/main/All_Configs_Sub.txt",
+        "https://raw.githubusercontent.com/skywrt/v2ray-Collector/master/v2ray",
+        "https://raw.githubusercontent.com/skywrt/v2"
+    )
+
     fun fetchAndCheckExternalConfigs() {
         if (_externalLoading.value) return
         _externalLoading.value = true
-        _externalStatusText.value = "Загрузка списка..."
+        _externalStatusText.value = "Загрузка списков..."
         viewModelScope.launch {
             try {
-                val content = fetchSubscriptionContent("https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt")
-                val allLinks = content.split(Regex("[\r\n]+"))
-                    .map { it.trim() }
-                    .filter { it.startsWith("vless://") || it.startsWith("vmess://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
-                    .distinct()
+                // Fetch all sources in parallel
+                val allLinks = mutableListOf<String>()
+                coroutineScope {
+                    val fetchJobs = externalSourceUrls.map { url ->
+                        async(Dispatchers.IO) {
+                            try {
+                                val content = fetchSubscriptionContent(url)
+                                // Try base64 decode (some sources are base64-encoded)
+                                val decoded = try {
+                                    val trimmed = content.trim()
+                                    val padded = when (trimmed.length % 4) {
+                                        2 -> trimmed + "=="
+                                        3 -> trimmed + "="
+                                        else -> trimmed
+                                    }
+                                    String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT))
+                                } catch (e: Exception) {
+                                    content
+                                }
+                                val parsed = decoded.split(Regex("[\r\n]+"))
+                                    .map { it.trim() }
+                                    .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
+                                parsed.takeLast(20) // Only check the latest 20 configs from each source to be efficient
+                            } catch (e: Exception) {
+                                emptyList()
+                            }
+                        }
+                    }
+                    fetchJobs.awaitAll().forEach { links ->
+                        allLinks.addAll(links)
+                    }
+                }
+
+                val uniqueLinks = allLinks.distinct()
                 
-                if (allLinks.isEmpty()) {
+                if (uniqueLinks.isEmpty()) {
                     _externalStatusText.value = "Конфигурации не найдены"
                     _externalConfigs.value = emptyList()
                     _externalLoading.value = false
                     return@launch
                 }
 
-                _externalStatusText.value = "Проверка серверов (0/${allLinks.size})..."
+                _externalStatusText.value = "Проверка серверов (0/${uniqueLinks.size})..."
                 
                 val checkedConfigs = mutableListOf<Pair<String, Long>>()
                 val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
@@ -384,20 +497,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val semaphore = kotlinx.coroutines.sync.Semaphore(30)
                 
                 coroutineScope {
-                    val jobs = allLinks.map { link ->
+                    val jobs = uniqueLinks.map { link ->
                         async(dispatcher) {
                             semaphore.acquire()
                             try {
                                 val hostPort = parseHostPort(link)
                                 val latency = if (hostPort != null) {
-                                    runTcpPing(hostPort.first, hostPort.second)
+                                    runFullPing(link, hostPort.first, hostPort.second)
                                 } else {
                                     -1L
                                 }
                                 val count = completedCount.incrementAndGet()
-                                if (count % 5 == 0 || count == allLinks.size) {
-                                    _externalStatusText.value = "Проверка серверов ($count/${allLinks.size})..."
-                                }
+                                _externalStatusText.value = "Проверка серверов ($count/${uniqueLinks.size})..."
                                 if (latency >= 0) {
                                     synchronized(checkedConfigs) {
                                         checkedConfigs.add(Pair(link, latency))
@@ -411,9 +522,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     jobs.awaitAll()
                 }
                 
-                val working = checkedConfigs.sortedBy { it.second }
+                val working = checkedConfigs.sortedBy { it.second }.take(10)
                 _externalConfigs.value = working
-                _externalStatusText.value = if (working.isEmpty()) "Нет рабочих серверов" else "Найдено рабочих: ${working.size}"
+                _externalStatusText.value = if (working.isEmpty()) "Нет рабочих серверов" else "Найдено рабочих: ${working.size} (топ-10)"
             } catch (e: Exception) {
                 _externalStatusText.value = "Ошибка: ${e.message}"
             } finally {

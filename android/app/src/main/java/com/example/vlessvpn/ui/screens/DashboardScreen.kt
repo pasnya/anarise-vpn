@@ -127,7 +127,7 @@ fun DashboardScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "Введите URL подписки с конфигурациями (VLESS / VMess / Naive / Hysteria2):",
+                        text = "Введите URL подписки с конфигурациями (VLESS / Naive / Hysteria2):",
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -246,12 +246,18 @@ fun DashboardScreen(
                     onClick = {
                         val clipboardText = clipboard.getText()?.text
                         if (!clipboardText.isNullOrBlank()) {
-                            val trimmed = clipboardText.toString().trim()
-                            if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://")) {
-                                viewModel.updateVlessLink(trimmed)
-                                com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
-                                viewModel.loadHistory()
-                                Toast.makeText(context, "Конфигурация добавлена из буфера", Toast.LENGTH_SHORT).show()
+                            val trimmed = clipboardText.trim()
+                            if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://")) {
+                                val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
+                                if (duplicate != null) {
+                                    viewModel.selectConfig(duplicate)
+                                    Toast.makeText(context, "Конфигурация уже есть, выбрана", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    viewModel.updateVlessLink(trimmed)
+                                    com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
+                                    viewModel.loadHistory()
+                                    Toast.makeText(context, "Конфигурация добавлена из буфера", Toast.LENGTH_SHORT).show()
+                                }
                             } else {
                                 Toast.makeText(context, "Неподдерживаемый формат ссылки в буфере", Toast.LENGTH_SHORT).show()
                             }
@@ -284,11 +290,17 @@ fun DashboardScreen(
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
                                     val trimmed = rawValue.trim()
-                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://")) {
-                                        viewModel.updateVlessLink(trimmed)
-                                        com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
-                                        viewModel.loadHistory()
-                                        Toast.makeText(context, "Конфигурация добавлена через QR-код", Toast.LENGTH_SHORT).show()
+                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://")) {
+                                        val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
+                                        if (duplicate != null) {
+                                            viewModel.selectConfig(duplicate)
+                                            Toast.makeText(context, "Конфигурация уже есть, выбрана", Toast.LENGTH_SHORT).show()
+                                        } else {
+                                            viewModel.updateVlessLink(trimmed)
+                                            com.example.vlessvpn.data.ConfigHistoryManager.saveConfigToHistory(context, trimmed)
+                                            viewModel.loadHistory()
+                                            Toast.makeText(context, "Конфигурация добавлена через QR-код", Toast.LENGTH_SHORT).show()
+                                        }
                                     } else {
                                         Toast.makeText(context, "Неподдерживаемый формат QR-кода", Toast.LENGTH_SHORT).show()
                                     }

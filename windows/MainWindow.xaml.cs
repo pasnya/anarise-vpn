@@ -1109,28 +1109,75 @@ namespace Anarise
         // --- EXTERNAL CONFIGS FETCH ---
         private async Task RefreshExternalConfigsAsync()
         {
-            PostToUi(new { action = "updateExternalStatus", statusText = "Загрузка списка серверов..." });
-            
+            PostToUi(new { action = "updateExternalStatus", statusText = "Загрузка списков..." });
+
+            var externalSourceUrls = new[]
+            {
+                "https://github.com/Epodonios/v2ray-configs/raw/main/Splitted-By-Protocol/vless.txt",
+                "https://raw.githubusercontent.com/V2RayRoot/V2RayConfig/refs/heads/main/Config/vless.txt",
+                "https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt",
+                "https://github.com/skywrt/v2ray-configs/raw/main/All_Configs_Sub.txt",
+                "https://raw.githubusercontent.com/skywrt/v2ray-Collector/master/v2ray",
+                "https://raw.githubusercontent.com/skywrt/v2"
+            };
+
+            var allLinks = new List<string>();
+
             using (var client = new HttpClient())
             {
                 client.Timeout = TimeSpan.FromSeconds(10);
                 try
                 {
-                    string content = await client.GetStringAsync("https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt");
-                    var allLinks = content.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
-                        .Select(link => link.Trim())
-                        .Where(link => link.StartsWith("vless://") || link.StartsWith("vmess://") || link.StartsWith("naive+https://") || link.StartsWith("hysteria2://") || link.StartsWith("hy2://"))
-                        .Distinct()
-                        .ToList();
-
-                    if (allLinks.Count == 0)
+                    var fetchTasks = externalSourceUrls.Select(async url =>
                     {
-                        PostToUi(new { action = "updateExternalStatus", statusText = "Серверы не найдены" });
+                        try
+                        {
+                            string content = await client.GetStringAsync(url);
+                            // Try base64 decode (some sources are base64-encoded)
+                            string decoded;
+                            try
+                            {
+                                string trimmed = content.Trim();
+                                int mod4 = trimmed.Length % 4;
+                                if (mod4 > 0) trimmed += new string('=', 4 - mod4);
+                                byte[] bytes = Convert.FromBase64String(trimmed);
+                                decoded = Encoding.UTF8.GetString(bytes);
+                            }
+                            catch
+                            {
+                                decoded = content;
+                            }
+
+                            var parsed = decoded.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                                .Select(link => link.Trim())
+                                .Where(link => link.StartsWith("vless://") || link.StartsWith("naive+https://") || link.StartsWith("hysteria2://") || link.StartsWith("hy2://"))
+                                .ToList();
+
+                            // Take the last 20 configs from this source to be efficient
+                            return parsed.Skip(Math.Max(0, parsed.Count - 20)).ToList();
+                        }
+                        catch
+                        {
+                            return new List<string>();
+                        }
+                    }).ToArray();
+
+                    var results = await Task.WhenAll(fetchTasks);
+                    foreach (var list in results)
+                    {
+                        allLinks.AddRange(list);
+                    }
+
+                    var uniqueLinks = allLinks.Distinct().ToList();
+
+                    if (uniqueLinks.Count == 0)
+                    {
+                        PostToUi(new { action = "updateExternalStatus", statusText = "Конфигурации не найдены" });
                         PostToUi(new { action = "updateExternalConfigs", configs = new object[0] });
                         return;
                     }
 
-                    PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка пингов серверов (0/{allLinks.Count})..." });
+                    PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка серверов (0/{uniqueLinks.Count})..." });
 
                     var workingConfigs = new List<object>();
                     int completed = 0;
@@ -1138,7 +1185,7 @@ namespace Anarise
                     // Throttling semaphore to limit concurrent TCP pings (similar to Android's Semaphore(30))
                     using (var semaphore = new System.Threading.SemaphoreSlim(30))
                     {
-                        var tasks = allLinks.Select(async link => {
+                        var pingTasks = uniqueLinks.Select(async link => {
                             await semaphore.WaitAsync();
                             try
                             {
@@ -1147,7 +1194,7 @@ namespace Anarise
                                 lock (workingConfigs)
                                 {
                                     completed++;
-                                    PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка пингов серверов ({completed}/{allLinks.Count})...." });
+                                    PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка серверов ({completed}/{uniqueLinks.Count})...." });
                                     if (latency >= 0)
                                     {
                                         workingConfigs.Add(new { link = link, latency = latency });
@@ -1160,12 +1207,13 @@ namespace Anarise
                             }
                         }).ToArray();
 
-                        await Task.WhenAll(tasks);
+                        await Task.WhenAll(pingTasks);
                     }
 
-                    // Sort working configs by lowest latency
+                    // Sort working configs by lowest latency and take top 10 (matching Android's limit of 10)
                     var sortedConfigs = workingConfigs.Cast<dynamic>()
                         .OrderBy(c => c.latency)
+                        .Take(10)
                         .ToList();
 
                     if (sortedConfigs.Count > 0)
@@ -1178,7 +1226,7 @@ namespace Anarise
                     }
 
                     PostToUi(new { action = "updateExternalConfigs", configs = sortedConfigs });
-                    PostToUi(new { action = "updateExternalStatus", statusText = sortedConfigs.Count > 0 ? $"Найдено рабочих: {sortedConfigs.Count}" : "Нет доступных рабочих серверов" });
+                    PostToUi(new { action = "updateExternalStatus", statusText = sortedConfigs.Count > 0 ? $"Найдено рабочих: {sortedConfigs.Count} (топ-10)" : "Нет рабочих серверов" });
                 }
                 catch (Exception ex)
                 {
@@ -1220,7 +1268,7 @@ namespace Anarise
                     foreach (var line in lines)
                     {
                         string trimmed = line.Trim();
-                        if (trimmed.StartsWith("vless://") || trimmed.StartsWith("vmess://") || trimmed.StartsWith("naive+https://") || trimmed.StartsWith("hysteria2://") || trimmed.StartsWith("hy2://"))
+                        if (trimmed.StartsWith("vless://") || trimmed.StartsWith("naive+https://") || trimmed.StartsWith("hysteria2://") || trimmed.StartsWith("hy2://"))
                         {
                             if (!configHistory.Contains(trimmed))
                             {
@@ -1265,7 +1313,7 @@ namespace Anarise
             }
 
             string text = Clipboard.GetText().Trim();
-            if (text.StartsWith("vless://") || text.StartsWith("vmess://") || text.StartsWith("naive+https://") || text.StartsWith("hysteria2://") || text.StartsWith("hy2://"))
+            if (text.StartsWith("vless://") || text.StartsWith("naive+https://") || text.StartsWith("hysteria2://") || text.StartsWith("hy2://"))
             {
                 if (!configHistory.Contains(text))
                 {
