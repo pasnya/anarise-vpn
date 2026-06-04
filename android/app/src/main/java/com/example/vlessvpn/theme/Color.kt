@@ -2,9 +2,15 @@ package com.example.vlessvpn.theme
 
 import androidx.compose.ui.graphics.Color
 
-val YellowMain = Color(0xFFFFCC00)
-val YellowDark = Color(0xFFCBA100)
-val BlackMain = Color(0xFF121212)
-val BlackSurface = Color(0xFF1E1E1E)
+val Charcoal = Color(0xFF121212)
+val SlateGray = Color(0xFF37474F)
+val ElectricNeon = Color(0xFF00E5FF)
+val CyanAccent = Color(0xFF00B8D4)
 val WhiteText = Color(0xFFFFFFFF)
 val GrayText = Color(0xFFAAAAAA)
+
+// Aliases for backward compatibility
+val YellowMain = ElectricNeon
+val YellowDark = CyanAccent
+val BlackMain = Charcoal
+val BlackSurface = SlateGray

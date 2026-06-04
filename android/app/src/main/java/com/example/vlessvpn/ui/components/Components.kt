@@ -45,7 +45,7 @@ fun ServerCard(
             .clickable { onSelect() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+            containerColor = MaterialTheme.colorScheme.surface,
             contentColor = MaterialTheme.colorScheme.onSurface
         ),
         border = if (isSelected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null
@@ -79,7 +79,7 @@ fun ServerCard(
                     } else if (ping != null) {
                         val pingColor = when {
                             ping < 0 -> MaterialTheme.colorScheme.error
-                            ping < 150 -> Color(0xFF4CAF50)
+                            ping < 150 -> MaterialTheme.colorScheme.secondary
                             ping < 300 -> Color(0xFFFF9800)
                             else -> MaterialTheme.colorScheme.error
                         }
@@ -133,7 +133,7 @@ fun StatCard(title: String, value: String, modifier: Modifier = Modifier) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(12.dp))
             .padding(16.dp)
     ) {
         Text(text = title, color = MaterialTheme.colorScheme.primary, fontSize = 14.sp)
@@ -153,7 +153,7 @@ fun SettingSwitchCard(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+            containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
         Row(
@@ -181,8 +181,8 @@ fun SettingSwitchCard(
                 checked = checked,
                 onCheckedChange = onCheckedChange,
                 colors = SwitchDefaults.colors(
-                    checkedThumbColor = MaterialTheme.colorScheme.primary,
-                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                    checkedThumbColor = MaterialTheme.colorScheme.secondary,
+                    checkedTrackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.4f)
                 )
             )
         }
@@ -202,7 +202,7 @@ fun AppRow(
             .clickable { onExclusionToggle() },
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+            containerColor = MaterialTheme.colorScheme.surface
         )
     ) {
         Row(
@@ -233,7 +233,7 @@ fun AppRow(
                 checked = isExcluded,
                 onCheckedChange = { onExclusionToggle() },
                 colors = CheckboxDefaults.colors(
-                    checkedColor = MaterialTheme.colorScheme.primary
+                    checkedColor = MaterialTheme.colorScheme.secondary
                 )
             )
         }

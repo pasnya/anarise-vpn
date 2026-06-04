@@ -432,6 +432,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val externalStatusText: StateFlow<String> = _externalStatusText.asStateFlow()
 
     private val externalSourceUrls = listOf(
+        "https://raw.githubusercontent.com/nikita29a/FreeProxyList/refs/heads/main/mirror/1.txt",
         "https://github.com/Epodonios/v2ray-configs/raw/main/Splitted-By-Protocol/vless.txt",
         "https://raw.githubusercontent.com/V2RayRoot/V2RayConfig/refs/heads/main/Config/vless.txt",
         "https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt",

@@ -209,7 +209,7 @@ fun DashboardScreen(
                     Icon(
                         imageVector = Icons.Default.Settings,
                         contentDescription = "Настройки",
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(28.dp)
                     )
                 }
@@ -227,7 +227,7 @@ fun DashboardScreen(
                     VyomState.ERROR -> "Ошибка"
                     else -> "Ожидание"
                 },
-                color = if (isConnected) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onBackground,
+                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -342,10 +342,10 @@ fun DashboardScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
+                    containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
             ) {
                 Row(
                     modifier = Modifier
@@ -356,7 +356,7 @@ fun DashboardScreen(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_vpn_tile),
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -496,7 +496,7 @@ fun DashboardScreen(
                             Icon(
                                 imageVector = Icons.Default.Refresh,
                                 contentDescription = "Проверить все пинги",
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.size(20.dp)
                             )
                         }
@@ -504,7 +504,7 @@ fun DashboardScreen(
                             Icon(
                                 imageVector = Icons.Default.Add,
                                 contentDescription = "Импорт подписки",
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.secondary,
                                 modifier = Modifier.size(24.dp)
                             )
                         }
@@ -568,7 +568,7 @@ fun DashboardScreen(
                         Icon(
                             imageVector = Icons.Default.Refresh,
                             contentDescription = "Обновить списки",
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(20.dp)
                         )
                     }

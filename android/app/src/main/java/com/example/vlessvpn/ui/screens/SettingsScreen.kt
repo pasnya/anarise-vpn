@@ -35,7 +35,7 @@ fun SettingsScreen(
                 title = { Text("Настройки", fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                        Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.secondary)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -80,7 +80,7 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f)
+                    containerColor = MaterialTheme.colorScheme.surface
                 )
             ) {
                 Row(

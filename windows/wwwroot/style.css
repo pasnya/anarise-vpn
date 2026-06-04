@@ -1,13 +1,14 @@
 :root {
-    --color-primary: #FFCC00;
-    --color-primary-dark: #CBA100;
+    --color-primary: #00E5FF;
+    --color-primary-dark: #00B8D4;
+    --color-secondary: #00B8D4;
     --color-background: #121212;
-    --color-surface: #1E1E1E;
-    --color-surface-hover: #292929;
-    --color-surface-border: rgba(255, 204, 0, 0.15);
+    --color-surface: #37474F;
+    --color-surface-hover: #455A64;
+    --color-surface-border: rgba(0, 229, 255, 0.15);
     --color-text-primary: #FFFFFF;
     --color-text-secondary: #AAAAAA;
-    --color-success: #4CAF50;
+    --color-success: #00E5FF;
     --color-error: #F44336;
     --color-warning: #FF9800;
 }
@@ -34,8 +35,8 @@ body {
     width: 100%;
     position: relative;
     background-image: 
-        linear-gradient(rgba(255, 204, 0, 0.02) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 204, 0, 0.02) 1px, transparent 1px);
+        linear-gradient(rgba(0, 229, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 229, 255, 0.02) 1px, transparent 1px);
     background-size: 20px 20px;
     background-position: center;
 }
@@ -81,7 +82,7 @@ body {
 .screen::-webkit-scrollbar-thumb,
 .servers-list::-webkit-scrollbar-thumb,
 .logs-view::-webkit-scrollbar-thumb {
-    background: rgba(255, 204, 0, 0.2);
+    background: rgba(0, 229, 255, 0.2);
     border-radius: 3px;
 }
 
@@ -117,13 +118,13 @@ body {
     font-size: 26px;
     font-weight: 700;
     letter-spacing: 1.5px;
-    text-shadow: 0 0 10px rgba(255, 204, 0, 0.2);
+    text-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
 }
 
 .icon-btn {
     background: none;
     border: none;
-    color: var(--color-primary);
+    color: var(--color-secondary);
     width: 40px;
     height: 40px;
     border-radius: 12px;
@@ -135,7 +136,7 @@ body {
 }
 
 .icon-btn:hover {
-    background: rgba(255, 204, 0, 0.1);
+    background: rgba(0, 184, 212, 0.15);
 }
 
 .icon-btn:active {
@@ -163,14 +164,14 @@ body {
 
 .status-text.connecting {
     color: var(--color-primary);
-    background: rgba(255, 204, 0, 0.1);
+    background: rgba(0, 229, 255, 0.1);
     animation: pulse 1.5s infinite;
 }
 
 .status-text.connected {
     color: var(--color-success);
-    background: rgba(76, 175, 80, 0.1);
-    box-shadow: 0 0 15px rgba(76, 175, 80, 0.1);
+    background: rgba(0, 229, 255, 0.1);
+    box-shadow: 0 0 15px rgba(0, 229, 255, 0.15);
 }
 
 .status-text.error {
@@ -189,10 +190,10 @@ body {
 .action-btn {
     flex: 1;
     height: 52px;
-    background: rgba(255, 204, 0, 0.1);
-    border: 1px solid rgba(255, 204, 0, 0.2);
+    background: rgba(0, 184, 212, 0.1);
+    border: 1px solid rgba(0, 184, 212, 0.2);
     border-radius: 16px;
-    color: var(--color-primary);
+    color: var(--color-secondary);
     font-size: 15px;
     font-weight: 500;
     display: flex;
@@ -204,8 +205,8 @@ body {
 }
 
 .action-btn:hover {
-    background: rgba(255, 204, 0, 0.18);
-    border-color: var(--color-primary);
+    background: rgba(0, 184, 212, 0.18);
+    border-color: var(--color-secondary);
 }
 
 .action-btn:active {
@@ -217,7 +218,7 @@ body {
     display: flex;
     align-items: center;
     width: 100%;
-    background: rgba(30, 30, 30, 0.4);
+    background: var(--color-surface);
     border: 1px solid var(--color-surface-border);
     border-radius: 16px;
     padding: 16px;
@@ -227,7 +228,7 @@ body {
 }
 
 .card-icon {
-    color: var(--color-primary);
+    color: var(--color-secondary);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -269,13 +270,13 @@ body {
     font-size: 18px;
     font-weight: 700;
     cursor: pointer;
-    box-shadow: 0 4px 15px rgba(255, 204, 0, 0.3);
+    box-shadow: 0 4px 15px rgba(0, 229, 255, 0.3);
     transition: background-color 0.2s, box-shadow 0.2s, transform 0.1s;
 }
 
 .connect-btn:hover {
-    background: #ffe066;
-    box-shadow: 0 6px 20px rgba(255, 204, 0, 0.45);
+    background: #33ebff;
+    box-shadow: 0 6px 20px rgba(0, 229, 255, 0.45);
 }
 
 .connect-btn:active {
@@ -516,11 +517,11 @@ body {
 
 .server-card.selected {
     border-color: var(--color-primary);
-    background: rgba(255, 204, 0, 0.02);
+    background: rgba(0, 229, 255, 0.04);
 }
 
 .server-icon {
-    color: var(--color-primary);
+    color: var(--color-secondary);
     display: flex;
     align-items: center;
 }
@@ -557,8 +558,8 @@ body {
 .ping-badge {
     font-size: 11px;
     font-weight: 700;
-    color: var(--color-success);
-    background: rgba(76, 175, 80, 0.1);
+    color: var(--color-secondary);
+    background: rgba(0, 184, 212, 0.1);
     padding: 2px 6px;
     border-radius: 6px;
 }
@@ -577,7 +578,7 @@ body {
     width: 14px;
     height: 14px;
     border: 2px solid transparent;
-    border-top-color: var(--color-primary);
+    border-top-color: var(--color-secondary);
     border-radius: 50%;
     animation: rotate 0.8s linear infinite;
 }
@@ -908,11 +909,11 @@ body {
 
 .dialog-btn.text-btn {
     background: none;
-    color: var(--color-primary);
+    color: var(--color-secondary);
 }
 
 .dialog-btn.text-btn:hover {
-    background: rgba(255, 204, 0, 0.08);
+    background: rgba(0, 184, 212, 0.08);
 }
 
 .dialog-btn.fill-btn {
@@ -921,7 +922,7 @@ body {
 }
 
 .dialog-btn.fill-btn:hover {
-    background: #ffe066;
+    background: #33ebff;
 }
 
 .dialog-btn:disabled {

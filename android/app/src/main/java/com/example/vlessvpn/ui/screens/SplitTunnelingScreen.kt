@@ -68,7 +68,7 @@ fun SplitTunnelingScreen(
                     title = { Text("Раздельное туннелирование", fontWeight = FontWeight.Bold) },
                     navigationIcon = {
                         IconButton(onClick = onBack) {
-                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад")
+                            Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Назад", tint = MaterialTheme.colorScheme.secondary)
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(

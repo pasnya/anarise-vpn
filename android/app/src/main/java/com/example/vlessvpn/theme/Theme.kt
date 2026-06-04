@@ -11,16 +11,20 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 private val DarkColorScheme = darkColorScheme(
-    primary = YellowMain,
-    secondary = YellowDark,
-    tertiary = YellowMain,
-    background = BlackMain,
-    surface = BlackSurface,
-    onPrimary = BlackMain,
-    onSecondary = BlackMain,
-    onTertiary = BlackMain,
+    primary = ElectricNeon,
+    secondary = CyanAccent,
+    tertiary = ElectricNeon,
+    background = Charcoal,
+    surface = SlateGray,
+    surfaceVariant = SlateGray,
+    primaryContainer = SlateGray,
+    secondaryContainer = SlateGray,
+    onPrimary = Charcoal,
+    onSecondary = Charcoal,
+    onTertiary = Charcoal,
     onBackground = WhiteText,
     onSurface = WhiteText,
+    onSurfaceVariant = GrayText,
 )
 
 @Composable
