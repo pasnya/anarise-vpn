@@ -9,8 +9,8 @@
 ## 🔑 Ключевые поисковые запросы / Keywords
 
 Для быстрого поиска проекта используются следующие ключевые слова:
-*   **Жирные (высокочастотные)**: `бесплатный vpn для андроид`, `free vpn for android`, `vpn клиент windows`, `vpn client windows`, `naiveproxy client`, `naiveproxy android client`, `hysteria2 vpn`, `обход блокировок`, `обход DPI`.
-*   **Специфические (средне/низкочастотные)**: `vless android клиент`, `naiveproxy андроид клиент`, `vpn без рекламы`, `раздельное туннелирование vpn`, `обфускация трафика salamander`.
+*   `бесплатный vpn для андроид`, `free vpn for android`, `vpn клиент windows`, `vpn client windows`, `naiveproxy client`, `naiveproxy android client`, `hysteria2 vpn`, `обход блокировок`, `обход DPI`.
+*    `vless android клиент`, `naiveproxy андроид клиент`, `vpn без рекламы`, `раздельное туннелирование vpn`, `обфускация трафика salamander`.
 
 ---
 
