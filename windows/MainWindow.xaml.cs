@@ -42,6 +42,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
+        private double zoomLevel = 1.0;
         private const string AppVersion = "1.2.0";
 
         // TUN tunnel process
@@ -125,6 +126,7 @@ namespace Anarise
                 }
                 
                 webView.CoreWebView2.SetVirtualHostNameToFolderMapping("anarise.local", wwwrootPath, CoreWebView2HostResourceAccessKind.Allow);
+                webView.ZoomFactor = zoomLevel;
                 webView.Source = new Uri("https://anarise.local/index.html");
 
                 webView.CoreWebView2.WebMessageReceived += OnWebViewMessageReceived;
@@ -214,6 +216,11 @@ namespace Anarise
                         {
                             int portVal = node["value"]?.AsValue().GetValue<int>() ?? 0;
                             UpdatePortSetting(sName, portVal);
+                        }
+                        else if (sName == "zoomLevel")
+                        {
+                            double zl = node["value"]?.AsValue().GetValue<double>() ?? 1.0;
+                            UpdateZoomLevel(zl);
                         }
                         else
                         {
@@ -1501,6 +1508,7 @@ namespace Anarise
                     if (settings.TryGetValue("httpPort", out var valHp)) httpPort = Convert.ToInt32(valHp.ToString());
                     if (settings.TryGetValue("vpnMode", out var valVm)) vpnMode = Convert.ToBoolean(valVm.ToString());
                     if (settings.TryGetValue("systemProxy", out var valSp2)) systemProxy = Convert.ToBoolean(valSp2.ToString());
+                    if (settings.TryGetValue("zoomLevel", out var valZl)) zoomLevel = Convert.ToDouble(valZl.ToString());
                 }
                 catch { }
             }
@@ -1518,7 +1526,8 @@ namespace Anarise
                 ["socksPort"] = socksPort,
                 ["httpPort"] = httpPort,
                 ["vpnMode"] = vpnMode,
-                ["systemProxy"] = systemProxy
+                ["systemProxy"] = systemProxy,
+                ["zoomLevel"] = zoomLevel
             };
             File.WriteAllText(settingsFilePath, JsonSerializer.Serialize(settings));
         }
@@ -1552,7 +1561,8 @@ namespace Anarise
                 socksPort = socksPort,
                 httpPort = httpPort,
                 vpnMode = vpnMode,
-                systemProxy = systemProxy
+                systemProxy = systemProxy,
+                zoomLevel = zoomLevel
             };
 
             PostToUi(new { action = "updateSettings", settings = settingsObj });
@@ -1624,6 +1634,16 @@ namespace Anarise
             {
                 case "socksPort": socksPort = val; break;
                 case "httpPort": httpPort = val; break;
+            }
+            SaveSettings();
+        }
+
+        private void UpdateZoomLevel(double zl)
+        {
+            zoomLevel = Math.Clamp(zl, 0.5, 1.5);
+            if (webView?.CoreWebView2 != null)
+            {
+                webView.ZoomFactor = zoomLevel;
             }
             SaveSettings();
         }

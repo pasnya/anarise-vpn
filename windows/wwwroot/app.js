@@ -15,7 +15,8 @@ let appState = {
         socksPort: 20808,
         httpPort: 20809,
         vpnMode: false,
-        systemProxy: true
+        systemProxy: true,
+        zoomLevel: 1.0
     },
     downloadProgress: 0,
     downloading: false,
@@ -210,6 +211,23 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('dialog-update').classList.add('hidden');
     });
 
+    // Zoom controls
+    document.getElementById('btn-zoom-in').addEventListener('click', () => {
+        const current = appState.settings.zoomLevel || 1.0;
+        const next = Math.min(1.5, +(current + 0.05).toFixed(2));
+        appState.settings.zoomLevel = next;
+        updateZoomDisplay(next);
+        sendToHost('saveSetting', { name: 'zoomLevel', value: next });
+    });
+    document.getElementById('btn-zoom-out').addEventListener('click', () => {
+        const current = appState.settings.zoomLevel || 1.0;
+        const next = Math.max(0.5, +(current - 0.05).toFixed(2));
+        appState.settings.zoomLevel = next;
+        updateZoomDisplay(next);
+        sendToHost('saveSetting', { name: 'zoomLevel', value: next });
+    });
+    updateZoomDisplay(appState.settings.zoomLevel);
+
     // Request initial state from host
     sendToHost('appReady');
 });
@@ -397,6 +415,12 @@ function syncSettingsUi() {
     document.getElementById('input-socks-port').value = appState.settings.socksPort || 20808;
     document.getElementById('input-http-port').value = appState.settings.httpPort || 20809;
     updateVpnModeUi(appState.settings.vpnMode);
+    updateZoomDisplay(appState.settings.zoomLevel || 1.0);
+}
+
+function updateZoomDisplay(level) {
+    const pct = Math.round((level || 1.0) * 100) + '%';
+    document.getElementById('zoom-value').innerText = pct;
 }
 
 function updateVpnModeUi(isVpn) {
