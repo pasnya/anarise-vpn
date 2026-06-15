@@ -9,6 +9,7 @@ namespace Anarise
     public static class LinkParser
     {
         public const string PROTOCOL_HYSTERIA2 = "__hysteria2__";
+        public const string PROTOCOL_MIERU = "__mieru__";
 
         public static bool IsHysteria2Config(string configJson)
         {
@@ -24,18 +25,213 @@ namespace Anarise
             return false;
         }
 
+        public static bool IsMieruConfig(string configJson)
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(configJson);
+                if (doc.RootElement.TryGetProperty("_protocol", out var protoProp))
+                {
+                    return protoProp.GetString() == PROTOCOL_MIERU;
+                }
+            }
+            catch { }
+            return false;
+        }
+
         public static string Parse(string link, int socksPort = 20808, int httpPort = 20809)
         {
-            if (link.StartsWith("vless://"))
-                return ParseVless(link, socksPort, httpPort);
-            if (link.StartsWith("vmess://"))
-                return ParseVmess(link, socksPort, httpPort);
-            if (link.StartsWith("naive+https://"))
-                return ParseNaive(link, socksPort, httpPort);
-            if (link.StartsWith("hysteria2://") || link.StartsWith("hy2://"))
-                return ParseHysteria2(link);
+            var trimmed = link.Trim();
+            if (trimmed.StartsWith("vless://"))
+                return ParseVless(trimmed, socksPort, httpPort);
+            if (trimmed.StartsWith("vmess://"))
+                return ParseVmess(trimmed, socksPort, httpPort);
+            if (trimmed.StartsWith("naive+https://"))
+                return ParseNaive(trimmed, socksPort, httpPort);
+            if (trimmed.StartsWith("hysteria2://") || trimmed.StartsWith("hy2://"))
+                return ParseHysteria2(trimmed);
+            if (trimmed.StartsWith("mieru://") || trimmed.StartsWith("mierus://"))
+                return ParseMieru(trimmed);
+            if (trimmed.Contains("type: mieru") || trimmed.Contains("type: \"mieru\"") || trimmed.Contains("type: 'mieru'"))
+                return ParseMieruYaml(trimmed);
 
-            throw new ArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy and Hysteria2 are supported");
+            throw new ArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy, Hysteria2 and Mieru are supported");
+        }
+
+        private static string ParseMieru(string link)
+        {
+            string prefix = link.StartsWith("mierus://") ? "mierus://" : "mieru://";
+            string content = link.Substring(prefix.Length);
+
+            try
+            {
+                string paddedContent = content.Trim().Replace('-', '+').Replace('_', '/');
+                int mod4 = paddedContent.Length % 4;
+                if (mod4 > 0) paddedContent += new string('=', 4 - mod4);
+
+                byte[] bytes = Convert.FromBase64String(paddedContent);
+                string decoded = Encoding.UTF8.GetString(bytes);
+                using var doc = JsonDocument.Parse(decoded);
+                var root = doc.RootElement;
+                if (root.TryGetProperty("profiles", out var profilesProp) && profilesProp.ValueKind == JsonValueKind.Array && profilesProp.GetArrayLength() > 0)
+                {
+                    var profile = profilesProp[0];
+                    var userObj = profile.GetProperty("user");
+                    string username = userObj.GetProperty("name").GetString() ?? "";
+                    string password = userObj.GetProperty("password").GetString() ?? "";
+                    var servers = profile.GetProperty("servers");
+                    var serverObj = servers[0];
+                    string ipAddress = "";
+                    if (serverObj.TryGetProperty("ipAddress", out var ipProp) && !string.IsNullOrEmpty(ipProp.GetString()))
+                    {
+                        ipAddress = ipProp.GetString() ?? "";
+                    }
+                    else if (serverObj.TryGetProperty("domainName", out var domainProp))
+                    {
+                        ipAddress = domainProp.GetString() ?? "";
+                    }
+                    var portBindings = serverObj.GetProperty("portBindings");
+                    var portObj = portBindings[0];
+                    int port = portObj.TryGetProperty("port", out var pProp) ? pProp.GetInt32() : 443;
+                    string protocol = portObj.TryGetProperty("protocol", out var protoProp) ? protoProp.GetString() ?? "TCP" : "TCP";
+
+                    string multiplexing = "MULTIPLEXING_LOW";
+                    if (profile.TryGetProperty("multiplexing", out var multiObj) && multiObj.TryGetProperty("level", out var lvlProp))
+                    {
+                        multiplexing = lvlProp.GetString() ?? "MULTIPLEXING_LOW";
+                    }
+
+                    var configObj = new JsonObject
+                    {
+                        ["_protocol"] = PROTOCOL_MIERU,
+                        ["server"] = $"{ipAddress}:{port}",
+                        ["server_host"] = ipAddress,
+                        ["server_port"] = port,
+                        ["username"] = username,
+                        ["password"] = password,
+                        ["multiplexing"] = multiplexing,
+                        ["transport"] = protocol
+                    };
+                    return configObj.ToJsonString();
+                }
+            }
+            catch { }
+
+            try
+            {
+                var normalizedLink = link.Replace("mierus://", "http://").Replace("mieru://", "http://");
+                var uri = new Uri(normalizedLink);
+                var queryParams = ParseQueryString(uri.Query);
+                string host = uri.Host;
+                int port = uri.Port != -1 ? uri.Port : 443;
+
+                string username = "";
+                string password = "";
+                if (!string.IsNullOrEmpty(uri.UserInfo))
+                {
+                    var parts = uri.UserInfo.Split(':', 2);
+                    username = parts[0];
+                    if (parts.Length > 1) password = parts[1];
+                }
+
+                queryParams.TryGetValue("multiplexing", out var multiplexing);
+                if (string.IsNullOrEmpty(multiplexing)) multiplexing = "MULTIPLEXING_LOW";
+                queryParams.TryGetValue("transport", out var transport);
+                if (string.IsNullOrEmpty(transport)) transport = "TCP";
+
+                var configObj = new JsonObject
+                {
+                    ["_protocol"] = PROTOCOL_MIERU,
+                    ["server"] = $"{host}:{port}",
+                    ["server_host"] = host,
+                    ["server_port"] = port,
+                    ["username"] = username,
+                    ["password"] = password,
+                    ["multiplexing"] = multiplexing,
+                    ["transport"] = transport
+                };
+                return configObj.ToJsonString();
+            }
+            catch (Exception ex)
+            {
+                throw new ArgumentException("Invalid Mieru link format", ex);
+            }
+        }
+
+        private static string ParseMieruYaml(string yaml)
+        {
+            var lines = yaml.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            int mieruTypeIndex = -1;
+            for (int k = 0; k < lines.Length; k++)
+            {
+                string line = lines[k].Trim();
+                if (line.StartsWith("type:") && line.Substring(5).Trim().Replace("\"", "").Replace("'", "") == "mieru")
+                {
+                    mieruTypeIndex = k;
+                    break;
+                }
+            }
+
+            if (mieruTypeIndex == -1)
+            {
+                throw new ArgumentException("No mieru proxy found in configuration");
+            }
+
+            int startIndex = mieruTypeIndex;
+            while (startIndex > 0 && !lines[startIndex].Trim().StartsWith("-"))
+            {
+                startIndex--;
+            }
+
+            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            for (int k = startIndex; k < lines.Length; k++)
+            {
+                string line = lines[k].Trim();
+                if (k > startIndex && (line.StartsWith("-") || string.IsNullOrEmpty(line) || line.StartsWith("proxy-groups:") || line.StartsWith("rules:")))
+                {
+                    break;
+                }
+
+                string cleanLine = line.StartsWith("-") ? line.Substring(1).Trim() : line;
+                int colonIndex = cleanLine.IndexOf(':');
+                if (colonIndex != -1)
+                {
+                    string key = cleanLine.Substring(0, colonIndex).Trim().Replace("\"", "").Replace("'", "");
+                    string val = cleanLine.Substring(colonIndex + 1).Trim().Replace("\"", "").Replace("'", "");
+                    fields[key] = val;
+                }
+            }
+
+            fields.TryGetValue("server", out var server);
+            if (string.IsNullOrEmpty(server)) throw new ArgumentException("Missing 'server' in mieru config");
+
+            fields.TryGetValue("port", out var portStr);
+            int port = int.TryParse(portStr, out int p) ? p : 443;
+
+            fields.TryGetValue("username", out var username);
+            if (string.IsNullOrEmpty(username)) throw new ArgumentException("Missing 'username' in mieru config");
+
+            fields.TryGetValue("password", out var password);
+            if (string.IsNullOrEmpty(password)) throw new ArgumentException("Missing 'password' in mieru config");
+
+            fields.TryGetValue("multiplexing", out var multiplexing);
+            if (string.IsNullOrEmpty(multiplexing)) multiplexing = "MULTIPLEXING_LOW";
+
+            fields.TryGetValue("transport", out var transport);
+            if (string.IsNullOrEmpty(transport)) transport = "TCP";
+
+            var configObj = new JsonObject
+            {
+                ["_protocol"] = PROTOCOL_MIERU,
+                ["server"] = $"{server}:{port}",
+                ["server_host"] = server,
+                ["server_port"] = port,
+                ["username"] = username,
+                ["password"] = password,
+                ["multiplexing"] = multiplexing,
+                ["transport"] = transport
+            };
+            return configObj.ToJsonString();
         }
 
         private static string ParseHysteria2(string link)

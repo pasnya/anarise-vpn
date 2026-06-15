@@ -15,6 +15,15 @@ object ConfigHistoryManager {
     fun extractConfigIdentity(link: String): String? {
         try {
             val trimmed = link.trim()
+            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") || trimmed.contains("type: mieru") || trimmed.contains("type: \"mieru\"") || trimmed.contains("type: 'mieru'")) {
+                val parsed = io.github.vyomtunnel.sdk.utils.LinkParser.parse(trimmed)
+                val obj = org.json.JSONObject(parsed)
+                val host = obj.getString("server_host")
+                val port = obj.getInt("server_port")
+                val protocol = if (trimmed.startsWith("mierus://")) "mierus" else "mieru"
+                return "$protocol:${host.lowercase()}:$port"
+            }
+
             val normalizedLink = if (trimmed.startsWith("hy2://")) {
                 "hysteria2://" + trimmed.substring(6)
             } else {

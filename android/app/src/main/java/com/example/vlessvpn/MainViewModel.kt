@@ -226,6 +226,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun parseHostPort(link: String): Pair<String, Int>? {
         try {
             val trimmed = link.trim()
+            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") || trimmed.contains("type: mieru")) {
+                val parsed = io.github.vyomtunnel.sdk.utils.LinkParser.parse(trimmed)
+                val obj = org.json.JSONObject(parsed)
+                return Pair(obj.getString("server_host"), obj.getInt("server_port"))
+            }
+
             val normalizedLink = if (trimmed.startsWith("hy2://")) {
                 "hysteria2://" + trimmed.substring(6)
             } else {
@@ -382,9 +388,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             content
         }
 
-        return decoded.split(Regex("[\r\n]+"))
+        val trimmedDecoded = decoded.trim()
+        if (trimmedDecoded.contains("type: mieru") || trimmedDecoded.contains("type: \"mieru\"") || trimmedDecoded.contains("type: 'mieru'")) {
+            return listOf(trimmedDecoded)
+        }
+
+        return trimmedDecoded.split(Regex("[\r\n]+"))
             .map { it.trim() }
-            .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
+            .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") || it.startsWith("mieru://") || it.startsWith("mierus://") }
     }
 
     fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {
@@ -468,7 +479,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                                 }
                                 val parsed = decoded.split(Regex("[\r\n]+"))
                                     .map { it.trim() }
-                                    .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") }
+                                    .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") || it.startsWith("mieru://") || it.startsWith("mierus://") }
                                 parsed.takeLast(20) // Only check the latest 20 configs from each source to be efficient
                             } catch (e: Exception) {
                                 emptyList()

@@ -175,6 +175,22 @@ object VyomVpnManager {
     }
 
     fun validateConfig(context: Context, config: String): String? {
+        if (LinkParser.isMieruConfig(config)) {
+            return try {
+                val obj = org.json.JSONObject(config)
+                if (obj.optString("server").isNullOrBlank()) {
+                    "Mieru server address is missing"
+                } else if (obj.optString("username").isNullOrBlank()) {
+                    "Mieru username is missing"
+                } else if (obj.optString("password").isNullOrBlank()) {
+                    "Mieru password is missing"
+                } else {
+                    null // Valid config
+                }
+            } catch (e: Exception) {
+                "Invalid Mieru JSON config: ${e.message}"
+            }
+        }
         if (LinkParser.isHysteria2Config(config)) {
             return try {
                 val obj = org.json.JSONObject(config)

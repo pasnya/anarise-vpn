@@ -20,6 +20,7 @@ import hev.htproxy.TProxyService
 import io.github.vyomtunnel.core.NativeEngine
 import io.github.vyomtunnel.sdk.utils.HysteriaEngine
 import io.github.vyomtunnel.sdk.utils.LinkParser
+import io.github.vyomtunnel.sdk.utils.MieruEngine
 import io.github.vyomtunnel.sdk.utils.VyomLogger
 import java.io.File
 import java.util.Timer
@@ -101,11 +102,143 @@ class VyomVpnService : TProxyService() {
 
     private fun startVpn(config: String) {
         val isHysteria2 = LinkParser.isHysteria2Config(config)
+        val isMieru = LinkParser.isMieruConfig(config)
 
-        if (isHysteria2) {
+        if (isMieru) {
+            startMieruVpn(config)
+        } else if (isHysteria2) {
             startHysteria2Vpn(config)
         } else {
             startXrayVpn(config)
+        }
+    }
+
+    /**
+     * Starts VPN with Mieru engine.
+     * Mieru binary runs as a SOCKS5 proxy on 127.0.0.1:20808.
+     */
+    private fun startMieruVpn(configJson: String) {
+        val sessionName = VyomVpnManager.getCustomName(this) ?: "Vyom VPN"
+        VyomLogger.i(this, "=== START VPN (Mieru) ===")
+
+        thread(name = "VyomMieruStartup") {
+            try {
+                // Stop any existing engines
+                NativeEngine.stopXray()
+                HysteriaEngine.stop()
+                MieruEngine.stop()
+                TProxyStopService()
+                Thread.sleep(500)
+
+                // Parse Mieru config
+                val obj = org.json.JSONObject(configJson)
+                val server = obj.getString("server")
+                val serverHost = obj.getString("server_host")
+                val serverPort = obj.getInt("server_port")
+                val username = obj.getString("username")
+                val password = obj.getString("password")
+                val multiplexing = obj.optString("multiplexing", "MULTIPLEXING_LOW")
+                val transport = obj.optString("transport", "TCP")
+
+                // Start Mieru engine
+                MieruEngine.start(
+                    context = this,
+                    server = server,
+                    username = username,
+                    password = password,
+                    multiplexing = multiplexing,
+                    transport = transport,
+                    logCallback = { msg ->
+                        VyomLogger.i(this, msg)
+                    }
+                )
+
+                // Give Mieru time to start its SOCKS5 listener
+                Thread.sleep(1000)
+
+                VyomLogger.i(this, "Mieru started, setting up TUN")
+
+                // Resolve server addresses for routing
+                val resolvedAddresses = try {
+                    java.net.InetAddress.getAllByName(serverHost).map { it.hostAddress }
+                } catch (e: Exception) {
+                    VyomLogger.e(this, "Failed to resolve server IP for $serverHost", e)
+                    emptyList<String>()
+                }
+
+                val builder = Builder()
+                    .setSession(sessionName)
+                    .addAddress("26.26.26.1", 24)
+                    .addRoute("0.0.0.0", 0)
+                    .addDnsServer("8.8.8.8")
+                    .addDisallowedApplication(packageName)
+                    .setMtu(1350)
+
+                if (resolvedAddresses.isEmpty()) {
+                    try {
+                        if (serverHost.contains(":")) {
+                            builder.addRoute(serverHost, 128)
+                        } else {
+                            builder.addRoute(serverHost, 32)
+                        }
+                    } catch (e: Exception) {
+                        VyomLogger.e(this, "Failed to add route for server fallback: $serverHost", e)
+                    }
+                } else {
+                    for (ip in resolvedAddresses) {
+                        try {
+                            if (ip.contains(":")) {
+                                builder.addRoute(ip, 128)
+                            } else {
+                                builder.addRoute(ip, 32)
+                            }
+                        } catch (e: Exception) {
+                            VyomLogger.e(this, "Failed to add route for server IP: $ip", e)
+                        }
+                    }
+                }
+
+                val excludedApps = VyomVpnManager.getExcludedApps(this)
+                for (pkg in excludedApps) {
+                    try {
+                        if (pkg != packageName) {
+                            builder.addDisallowedApplication(pkg)
+                        }
+                    } catch (e: Exception) {
+                        VyomLogger.e(this, "Failed to exclude $pkg", e)
+                    }
+                }
+
+                if (VyomVpnManager.isKillSwitchEnabled(this)) {
+                    builder.setBlocking(true)
+                }
+
+                tunInterface = builder.establish()
+                val fd = tunInterface?.fd ?: throw IllegalStateException("TUN failed")
+                VyomLogger.i(this, "TUN OK FD=$fd")
+
+                val tunFile = File(filesDir, "tun.yaml")
+                tunFile.writeText("""
+                tunnel:
+                  mtu: 1350
+                  ipv4: 26.26.26.1
+                socks5:
+                  address: 127.0.0.1
+                  port: 20808
+                  udp: udp
+                """.trimIndent())
+
+                TProxyStartService(tunFile.absolutePath, fd)
+
+                startStatsTicker()
+                notifyStatus(VyomState.CONNECTED)
+                VyomLogger.i(this, "=== VPN CONNECTED (Mieru) ===")
+
+            } catch (e: Exception) {
+                VyomLogger.e(this, "VPN START FAILED (Mieru)", e)
+                MieruEngine.stop()
+                notifyStatus(VyomState.ERROR)
+            }
         }
     }
 
@@ -362,6 +495,7 @@ class VyomVpnService : TProxyService() {
                 this@VyomVpnService.TProxyStopService()
                 NativeEngine.stopXray()
                 HysteriaEngine.stop()
+                MieruEngine.stop()
 
                 notifyStatus(VyomState.DISCONNECTED)
                 stopSelf()
@@ -523,6 +657,11 @@ class VyomVpnService : TProxyService() {
     private fun extractServerIp(config: String): String? {
         return try {
             val obj = org.json.JSONObject(config)
+
+            // Mieru config
+            if (obj.optString("_protocol") == LinkParser.PROTOCOL_MIERU) {
+                return obj.optString("server_host", null)
+            }
 
             // Hysteria2 config
             if (obj.optString("_protocol") == LinkParser.PROTOCOL_HYSTERIA2) {

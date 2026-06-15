@@ -294,7 +294,8 @@ namespace Anarise
                 if (gen != connectionGeneration) return;
 
                 bool isHysteria = LinkParser.IsHysteria2Config(parsedConfig);
-                string executable = isHysteria ? "hysteria.exe" : "xray.exe";
+                bool isMieru = LinkParser.IsMieruConfig(parsedConfig);
+                string executable = isMieru ? "mieru.exe" : (isHysteria ? "hysteria.exe" : "xray.exe");
                 string exePath = Path.Combine(binariesPath, executable);
 
                 if (!File.Exists(exePath))
@@ -305,7 +306,30 @@ namespace Anarise
                 }
 
                 // Resolve server domain to IP using DoH
-                if (isHysteria)
+                if (isMieru)
+                {
+                    try
+                    {
+                        var rawMieruConfig = JsonNode.Parse(parsedConfig).AsObject();
+                        string host = rawMieruConfig["server_host"]?.ToString();
+                        string port = rawMieruConfig["server_port"]?.ToString();
+                        
+                        if (!string.IsNullOrEmpty(host))
+                        {
+                            string resolvedIp = await ResolveDohAsync(host);
+                            if (gen != connectionGeneration) return;
+                            
+                            rawMieruConfig["server"] = $"{resolvedIp}:{port}";
+                            rawMieruConfig["server_host"] = resolvedIp;
+                            parsedConfig = rawMieruConfig.ToJsonString();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        LogToUi("Ошибка разрешения DNS для Mieru: " + ex.Message);
+                    }
+                }
+                else if (isHysteria)
                 {
                     try
                     {
@@ -398,9 +422,56 @@ namespace Anarise
                 if (gen != connectionGeneration) return;
 
                 // Write configuration file
-                string configPath = Path.Combine(appDataPath, isHysteria ? "hysteria_config.json" : "xray_config.json");
+                string configPath;
+                if (isMieru) configPath = Path.Combine(appDataPath, "mieru_config.json");
+                else if (isHysteria) configPath = Path.Combine(appDataPath, "hysteria_config.json");
+                else configPath = Path.Combine(appDataPath, "xray_config.json");
                 
-                if (isHysteria)
+                if (isMieru)
+                {
+                    var rawMieruConfig = JsonNode.Parse(parsedConfig).AsObject();
+                    
+                    var profile = new JsonObject
+                    {
+                        ["profileName"] = "default",
+                        ["user"] = new JsonObject
+                        {
+                            ["name"] = rawMieruConfig["username"]?.ToString(),
+                            ["password"] = rawMieruConfig["password"]?.ToString()
+                        },
+                        ["servers"] = new JsonArray(new JsonObject
+                        {
+                            ["ipAddress"] = rawMieruConfig["server_host"]?.ToString(),
+                            ["domainName"] = "",
+                            ["portBindings"] = new JsonArray(new JsonObject
+                            {
+                                ["port"] = rawMieruConfig["server_port"]?.AsValue().GetValue<int>() ?? 443,
+                                ["protocol"] = rawMieruConfig["transport"]?.ToString() ?? "TCP"
+                            })
+                        }),
+                        ["mtu"] = 1350,
+                        ["multiplexing"] = new JsonObject
+                        {
+                            ["level"] = rawMieruConfig["multiplexing"]?.ToString() ?? "MULTIPLEXING_LOW"
+                        },
+                        ["handshakeMode"] = "HANDSHAKE_STANDARD"
+                    };
+
+                    var mieruConfig = new JsonObject
+                    {
+                        ["profiles"] = new JsonArray(profile),
+                        ["activeProfile"] = "default",
+                        ["rpcPort"] = 0,
+                        ["socks5Port"] = socksPort,
+                        ["socks5ListenLAN"] = false,
+                        ["httpProxyPort"] = 0,
+                        ["httpProxyListenLAN"] = false,
+                        ["loggingLevel"] = "INFO"
+                    };
+
+                    File.WriteAllText(configPath, mieruConfig.ToJsonString());
+                }
+                else if (isHysteria)
                 {
                     var rawHysteriaConfig = JsonNode.Parse(parsedConfig).AsObject();
                     
@@ -447,7 +518,7 @@ namespace Anarise
                 ProcessStartInfo psi = new ProcessStartInfo
                 {
                     FileName = exePath,
-                    Arguments = isHysteria ? $"-c \"{configPath}\" client" : $"-c \"{configPath}\"",
+                    Arguments = isMieru ? "run" : (isHysteria ? $"-c \"{configPath}\" client" : $"-c \"{configPath}\""),
                     WorkingDirectory = binariesPath,
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -458,6 +529,10 @@ namespace Anarise
                 };
                 psi.Environment["GOMEMLIMIT"] = "50MiB";
                 psi.Environment["GOGC"] = "30";
+                if (isMieru)
+                {
+                    psi.Environment["MIERU_CONFIG_JSON_FILE"] = configPath;
+                }
 
                 coreProcess = new Process { StartInfo = psi };
                 coreProcess.EnableRaisingEvents = true;
@@ -774,7 +849,8 @@ namespace Anarise
             try
             {
                 var doc = JsonNode.Parse(configJson);
-                if (isHysteria)
+                var protocol = doc["_protocol"]?.ToString();
+                if (protocol == LinkParser.PROTOCOL_HYSTERIA2 || protocol == LinkParser.PROTOCOL_MIERU)
                 {
                     string server = doc["server_host"]?.ToString() ?? doc["server"]?.ToString();
                     if (!string.IsNullOrEmpty(server))
@@ -1000,30 +1076,49 @@ namespace Anarise
             return await Task.Run(async () => {
                 try
                 {
-                    var uri = new Uri(link.StartsWith("vmess://") ? "http://vmess.server" : link.Replace("naive+", "").Replace("hy2://", "hysteria2://"));
-                    string host = uri.Host;
-                    int port = uri.Port != -1 ? uri.Port : 443;
-                    
+                    string host = "";
+                    int port = 443;
                     string protocol = "";
-                    if (link.StartsWith("vless://")) protocol = "vless";
-                    else if (link.StartsWith("vmess://")) protocol = "vmess";
-                    else if (link.StartsWith("naive+https://")) protocol = "naive";
-                    else if (link.StartsWith("hysteria2://") || link.StartsWith("hy2://")) protocol = "hysteria2";
 
-                    if (link.StartsWith("vmess://"))
+                    if (link.StartsWith("mieru://") || link.StartsWith("mierus://") || link.Contains("type: mieru"))
                     {
-                        string raw = link.Substring("vmess://".Length);
-                        int mod4 = raw.Length % 4;
-                        if (mod4 > 0) raw += new string('=', 4 - mod4);
-                        byte[] bytes = Convert.FromBase64String(raw);
-                        string jsonStr = Encoding.UTF8.GetString(bytes);
-                        var v = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr);
-                        if (v != null)
+                        try
                         {
-                            if (v.TryGetValue("add", out var addObj) && addObj != null)
-                                host = addObj.ToString();
-                            if (v.TryGetValue("port", out var portObj) && portObj != null)
-                                port = Convert.ToInt32(portObj.ToString());
+                            var parsed = LinkParser.Parse(link);
+                            using var doc = JsonDocument.Parse(parsed);
+                            var root = doc.RootElement;
+                            host = root.GetProperty("server_host").GetString() ?? "";
+                            port = root.GetProperty("server_port").GetInt32();
+                            protocol = "mieru";
+                        }
+                        catch { return -1L; }
+                    }
+                    else
+                    {
+                        var uri = new Uri(link.StartsWith("vmess://") ? "http://vmess.server" : link.Replace("naive+", "").Replace("hy2://", "hysteria2://"));
+                        host = uri.Host;
+                        port = uri.Port != -1 ? uri.Port : 443;
+                        
+                        if (link.StartsWith("vless://")) protocol = "vless";
+                        else if (link.StartsWith("vmess://")) protocol = "vmess";
+                        else if (link.StartsWith("naive+https://")) protocol = "naive";
+                        else if (link.StartsWith("hysteria2://") || link.StartsWith("hy2://")) protocol = "hysteria2";
+
+                        if (link.StartsWith("vmess://"))
+                        {
+                            string raw = link.Substring("vmess://".Length);
+                            int mod4 = raw.Length % 4;
+                            if (mod4 > 0) raw += new string('=', 4 - mod4);
+                            byte[] bytes = Convert.FromBase64String(raw);
+                            string jsonStr = Encoding.UTF8.GetString(bytes);
+                            var v = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr);
+                            if (v != null)
+                            {
+                                if (v.TryGetValue("add", out var addObj) && addObj != null)
+                                    host = addObj.ToString();
+                                if (v.TryGetValue("port", out var portObj) && portObj != null)
+                                    port = Convert.ToInt32(portObj.ToString());
+                            }
                         }
                     }
 
@@ -1033,6 +1128,7 @@ namespace Anarise
                     bool useTls = false;
                     if (protocol == "vless" || protocol == "naive")
                     {
+                        var uri = new Uri(link.StartsWith("vmess://") ? "http://vmess.server" : link.Replace("naive+", "").Replace("hy2://", "hysteria2://"));
                         var queryParams = LinkParser.ParseQueryString(uri.Query);
                         queryParams.TryGetValue("security", out var security);
                         useTls = (security != "none" && !string.IsNullOrEmpty(security)) || (protocol == "naive");
@@ -1151,7 +1247,7 @@ namespace Anarise
 
                             var parsed = decoded.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
                                 .Select(link => link.Trim())
-                                .Where(link => link.StartsWith("vless://") || link.StartsWith("naive+https://") || link.StartsWith("hysteria2://") || link.StartsWith("hy2://"))
+                                .Where(link => link.StartsWith("vless://") || link.StartsWith("naive+https://") || link.StartsWith("hysteria2://") || link.StartsWith("hy2://") || link.StartsWith("mieru://") || link.StartsWith("mierus://"))
                                 .ToList();
 
                             // Take the last 20 configs from this source to be efficient
@@ -1264,17 +1360,29 @@ namespace Anarise
                         decodedContent = content; // Fallback to plain text
                     }
 
-                    var lines = decodedContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
                     int addedCount = 0;
-                    foreach (var line in lines)
+                    string trimmedDecoded = decodedContent.Trim();
+                    if (trimmedDecoded.Contains("type: mieru") || trimmedDecoded.Contains("type: \"mieru\"") || trimmedDecoded.Contains("type: 'mieru'"))
                     {
-                        string trimmed = line.Trim();
-                        if (trimmed.StartsWith("vless://") || trimmed.StartsWith("naive+https://") || trimmed.StartsWith("hysteria2://") || trimmed.StartsWith("hy2://"))
+                        if (!configHistory.Contains(trimmedDecoded))
                         {
-                            if (!configHistory.Contains(trimmed))
+                            configHistory.Add(trimmedDecoded);
+                            addedCount++;
+                        }
+                    }
+                    else
+                    {
+                        var lines = decodedContent.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var line in lines)
+                        {
+                            string trimmed = line.Trim();
+                            if (trimmed.StartsWith("vless://") || trimmed.StartsWith("naive+https://") || trimmed.StartsWith("hysteria2://") || trimmed.StartsWith("hy2://") || trimmed.StartsWith("mieru://") || trimmed.StartsWith("mierus://"))
                             {
-                                configHistory.Add(trimmed);
-                                addedCount++;
+                                if (!configHistory.Contains(trimmed))
+                                {
+                                    configHistory.Add(trimmed);
+                                    addedCount++;
+                                }
                             }
                         }
                     }
@@ -1314,7 +1422,7 @@ namespace Anarise
             }
 
             string text = Clipboard.GetText().Trim();
-            if (text.StartsWith("vless://") || text.StartsWith("naive+https://") || text.StartsWith("hysteria2://") || text.StartsWith("hy2://"))
+            if (text.StartsWith("vless://") || text.StartsWith("naive+https://") || text.StartsWith("hysteria2://") || text.StartsWith("hy2://") || text.StartsWith("mieru://") || text.StartsWith("mierus://") || text.Contains("type: mieru") || text.Contains("type: \"mieru\"") || text.Contains("type: 'mieru'"))
             {
                 if (!configHistory.Contains(text))
                 {
@@ -1347,13 +1455,15 @@ namespace Anarise
             string hysteriaExe = Path.Combine(binariesPath, "hysteria.exe");
             string tun2socksExe = Path.Combine(binariesPath, "tun2socks.exe");
             string wintunDll = Path.Combine(binariesPath, "wintun.dll");
+            string mieruExe = Path.Combine(binariesPath, "mieru.exe");
 
             bool needsXray = !File.Exists(xrayExe) || !File.Exists(Path.Combine(binariesPath, "geoip.dat")) || !File.Exists(Path.Combine(binariesPath, "geosite.dat"));
             bool needsHysteria = !File.Exists(hysteriaExe);
             bool needsTun2Socks = !File.Exists(tun2socksExe);
             bool needsWintun = !File.Exists(wintunDll);
+            bool needsMieru = !File.Exists(mieruExe);
 
-            if (needsXray || needsHysteria || needsTun2Socks || needsWintun)
+            if (needsXray || needsHysteria || needsTun2Socks || needsWintun || needsMieru)
             {
                 PostToUi(new { action = "downloadProgress", downloading = true, progress = 0 });
                 LogToUi("Запуск процесса загрузки недостающих модулей...");
@@ -1361,7 +1471,7 @@ namespace Anarise
                 try
                 {
                     // Calculate progress segments based on what needs downloading
-                    int segments = (needsXray ? 1 : 0) + (needsHysteria ? 1 : 0) + (needsTun2Socks ? 1 : 0) + (needsWintun ? 1 : 0);
+                    int segments = (needsXray ? 1 : 0) + (needsHysteria ? 1 : 0) + (needsTun2Socks ? 1 : 0) + (needsWintun ? 1 : 0) + (needsMieru ? 1 : 0);
                     int segSize = 100 / segments;
                     int pos = 0;
 
@@ -1385,6 +1495,21 @@ namespace Anarise
                         LogToUi("Загрузка Hysteria2...");
                         await DownloadFileWithProgress("https://github.com/apernet/hysteria/releases/latest/download/hysteria-windows-amd64.exe", hysteriaExe, pos, pos + segSize);
                         LogToUi("Hysteria2 успешно установлен.");
+                        pos += segSize;
+                    }
+
+                    if (needsMieru)
+                    {
+                        LogToUi("Загрузка Mieru...");
+                        string mieruZip = Path.Combine(appDataPath, "mieru.zip");
+                        await DownloadFileWithProgress("https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_windows_amd64.zip", mieruZip, pos, pos + segSize);
+                        
+                        LogToUi("Распаковка Mieru...");
+                        await Task.Run(() => {
+                            ZipFile.ExtractToDirectory(mieruZip, binariesPath, true);
+                        });
+                        File.Delete(mieruZip);
+                        LogToUi("Mieru успешно установлен.");
                         pos += segSize;
                     }
 

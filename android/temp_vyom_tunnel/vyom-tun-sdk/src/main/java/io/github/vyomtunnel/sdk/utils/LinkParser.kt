@@ -15,15 +15,19 @@ object LinkParser {
 
     /** Marker used in the generated JSON to identify Hysteria2 configs */
     const val PROTOCOL_HYSTERIA2 = "__hysteria2__"
+    const val PROTOCOL_MIERU = "__mieru__"
 
     fun parse(link: String): String {
+        val trimmed = link.trim()
         return try {
             when {
-                link.startsWith("vless://") -> parseVless(link)
-                link.startsWith("vmess://") -> parseVmess(link)
-                link.startsWith("naive+https://") -> parseNaive(link)
-                link.startsWith("hysteria2://") || link.startsWith("hy2://") -> parseHysteria2(link)
-                else -> throw IllegalArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy and Hysteria2 are supported")
+                trimmed.startsWith("vless://") -> parseVless(trimmed)
+                trimmed.startsWith("vmess://") -> parseVmess(trimmed)
+                trimmed.startsWith("naive+https://") -> parseNaive(trimmed)
+                trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") -> parseHysteria2(trimmed)
+                trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") -> parseMieru(trimmed)
+                trimmed.contains("type: mieru") || trimmed.contains("type: \"mieru\"") || trimmed.contains("type: 'mieru'") -> parseMieruYaml(trimmed)
+                else -> throw IllegalArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy, Hysteria2 and Mieru are supported")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Failed to parse link: $link", e)
@@ -41,6 +45,137 @@ object LinkParser {
         } catch (e: Exception) {
             false
         }
+    }
+
+    /**
+     * Checks whether the given config JSON was generated from a Mieru link.
+     */
+    fun isMieruConfig(configJson: String): Boolean {
+        return try {
+            val obj = JSONObject(configJson)
+            obj.optString("_protocol") == PROTOCOL_MIERU
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun parseMieru(link: String): String {
+        val prefix = if (link.startsWith("mierus://")) "mierus://" else "mieru://"
+        val content = link.substring(prefix.length)
+
+        try {
+            val decodedBytes = Base64.decode(content.replace('-', '+').replace('_', '/'), Base64.DEFAULT)
+            val decoded = String(decodedBytes, StandardCharsets.UTF_8)
+            val json = JSONObject(decoded)
+            val profiles = json.optJSONArray("profiles")
+            if (profiles != null && profiles.length() > 0) {
+                val profile = profiles.getJSONObject(0)
+                val userObj = profile.getJSONObject("user")
+                val username = userObj.getString("name")
+                val password = userObj.getString("password")
+                val servers = profile.getJSONArray("servers")
+                val serverObj = servers.getJSONObject(0)
+                val ipAddress = serverObj.optString("ipAddress").ifEmpty { serverObj.optString("domainName") }
+                val portBindings = serverObj.getJSONArray("portBindings")
+                val portObj = portBindings.getJSONObject(0)
+                val port = portObj.optInt("port", 443)
+                val protocol = portObj.optString("protocol", "TCP")
+                val multiplexing = profile.optJSONObject("multiplexing")?.optString("level", "MULTIPLEXING_LOW") ?: "MULTIPLEXING_LOW"
+
+                return JSONObject().apply {
+                    put("_protocol", PROTOCOL_MIERU)
+                    put("server", "$ipAddress:$port")
+                    put("server_host", ipAddress)
+                    put("server_port", port)
+                    put("username", username)
+                    put("password", password)
+                    put("multiplexing", multiplexing)
+                    put("transport", protocol)
+                }.toString()
+            }
+        } catch (e: Exception) {
+            // Fallback to simple link format
+        }
+
+        try {
+            val normalizedLink = link.replace("mierus://", "http://").replace("mieru://", "http://")
+            val uri = Uri.parse(normalizedLink)
+            val params = uri.queryParameterNames.associateWith { uri.getQueryParameter(it).orEmpty() }
+            val host = uri.host.orEmpty()
+            val port = if (uri.port != -1) uri.port else 443
+
+            val userInfo = uri.userInfo.orEmpty()
+            val userPass = userInfo.split(":", limit = 2)
+            val username = userPass.getOrNull(0).orEmpty()
+            val password = userPass.getOrNull(1).orEmpty()
+
+            val multiplexing = params["multiplexing"]?.ifEmpty { "MULTIPLEXING_LOW" } ?: "MULTIPLEXING_LOW"
+            val transport = params["transport"]?.ifEmpty { "TCP" } ?: "TCP"
+
+            return JSONObject().apply {
+                put("_protocol", PROTOCOL_MIERU)
+                put("server", "$host:$port")
+                put("server_host", host)
+                put("server_port", port)
+                put("username", username)
+                put("password", password)
+                put("multiplexing", multiplexing)
+                put("transport", transport)
+            }.toString()
+        } catch (e: Exception) {
+            throw IllegalArgumentException("Invalid Mieru link format", e)
+        }
+    }
+
+    private fun parseMieruYaml(yaml: String): String {
+        val lines = yaml.lines().map { it.trim() }
+        val mieruTypeIndex = lines.indexOfFirst {
+            it.startsWith("type:") && it.substringAfter("type:").trim().replace("\"", "").replace("'", "") == "mieru"
+        }
+        if (mieruTypeIndex == -1) {
+            throw IllegalArgumentException("No mieru proxy found in configuration")
+        }
+
+        var startIndex = mieruTypeIndex
+        while (startIndex > 0 && !lines[startIndex].startsWith("-")) {
+            startIndex--
+        }
+
+        val fields = mutableMapOf<String, String>()
+        var i = startIndex
+        while (i < lines.size) {
+            val line = lines[i]
+            if (i > startIndex && (line.startsWith("-") || line.isEmpty() || line.startsWith("proxy-groups:") || line.startsWith("rules:"))) {
+                break
+            }
+
+            val cleanLine = if (line.startsWith("-")) line.removePrefix("-").trim() else line
+            val colonIndex = cleanLine.indexOf(":")
+            if (colonIndex != -1) {
+                val key = cleanLine.substring(0, colonIndex).trim().replace("\"", "").replace("'", "")
+                val value = cleanLine.substring(colonIndex + 1).trim().replace("\"", "").replace("'", "")
+                fields[key] = value
+            }
+            i++
+        }
+
+        val server = fields["server"] ?: throw IllegalArgumentException("Missing 'server' in mieru config")
+        val port = fields["port"]?.toIntOrNull() ?: 443
+        val username = fields["username"] ?: throw IllegalArgumentException("Missing 'username' in mieru config")
+        val password = fields["password"] ?: throw IllegalArgumentException("Missing 'password' in mieru config")
+        val multiplexing = fields["multiplexing"] ?: "MULTIPLEXING_LOW"
+        val transport = fields["transport"] ?: "TCP"
+
+        return JSONObject().apply {
+            put("_protocol", PROTOCOL_MIERU)
+            put("server", "$server:$port")
+            put("server_host", server)
+            put("server_port", port)
+            put("username", username)
+            put("password", password)
+            put("multiplexing", multiplexing)
+            put("transport", transport)
+        }.toString()
     }
 
     /**
