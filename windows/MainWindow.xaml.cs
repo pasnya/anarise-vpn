@@ -42,7 +42,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.3.0";
+        private const string AppVersion = "1.3.1";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -467,9 +467,10 @@ namespace Anarise
                     {
                         ["profiles"] = new JsonArray(profile),
                         ["activeProfile"] = "default",
-                        ["rpcPort"] = 0,
+                        ["rpcPort"] = 20810,
                         ["socks5Port"] = socksPort,
                         ["socks5ListenLAN"] = false,
+                        ["socks5UDPAssociate"] = true,
                         ["httpProxyPort"] = 0,
                         ["httpProxyListenLAN"] = false,
                         ["loggingLevel"] = "INFO"

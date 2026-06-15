@@ -153,9 +153,10 @@ object MieruEngine {
 
         json.put("profiles", JSONArray().put(profile))
         json.put("activeProfile", "default")
-        json.put("rpcPort", 0)
+        json.put("rpcPort", 20810)
         json.put("socks5Port", SOCKS_PORT)
         json.put("socks5ListenLAN", false)
+        json.put("socks5UDPAssociate", true)
         json.put("httpProxyPort", 0)
         json.put("httpProxyListenLAN", false)
         json.put("loggingLevel", "INFO")
@@ -167,7 +168,7 @@ object MieruEngine {
         return try {
             val proc = process ?: return "unknown"
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                proc.javaClass.getMethod("pid").invoke(proc).toString()
+                proc.javaClass.getMethod("pid").invoke(proc)?.toString() ?: "unknown"
             } else {
                 val f = proc.javaClass.getDeclaredField("pid")
                 f.isAccessible = true

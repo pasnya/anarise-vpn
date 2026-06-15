@@ -160,12 +160,13 @@ namespace Anarise
 
         private static string ParseMieruYaml(string yaml)
         {
-            var lines = yaml.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var lines = yaml.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
             int mieruTypeIndex = -1;
             for (int k = 0; k < lines.Length; k++)
             {
                 string line = lines[k].Trim();
-                if (line.StartsWith("type:") && line.Substring(5).Trim().Replace("\"", "").Replace("'", "") == "mieru")
+                string cleanLine = line.StartsWith("-") ? line.Substring(1).Trim() : line;
+                if (cleanLine.StartsWith("type:") && cleanLine.Substring(5).Trim().Replace("\"", "").Replace("'", "") == "mieru")
                 {
                     mieruTypeIndex = k;
                     break;
@@ -187,9 +188,14 @@ namespace Anarise
             for (int k = startIndex; k < lines.Length; k++)
             {
                 string line = lines[k].Trim();
-                if (k > startIndex && (line.StartsWith("-") || string.IsNullOrEmpty(line) || line.StartsWith("proxy-groups:") || line.StartsWith("rules:")))
+                if (k > startIndex && (line.StartsWith("-") || line.StartsWith("proxy-groups:") || line.StartsWith("rules:") || line.StartsWith("proxies:")))
                 {
                     break;
+                }
+
+                if (string.IsNullOrEmpty(line) || line.StartsWith("#"))
+                {
+                    continue;
                 }
 
                 string cleanLine = line.StartsWith("-") ? line.Substring(1).Trim() : line;

@@ -129,8 +129,9 @@ object LinkParser {
 
     private fun parseMieruYaml(yaml: String): String {
         val lines = yaml.lines().map { it.trim() }
-        val mieruTypeIndex = lines.indexOfFirst {
-            it.startsWith("type:") && it.substringAfter("type:").trim().replace("\"", "").replace("'", "") == "mieru"
+        val mieruTypeIndex = lines.indexOfFirst { line ->
+            val clean = if (line.startsWith("-")) line.removePrefix("-").trim() else line
+            clean.startsWith("type:") && clean.substringAfter("type:").trim().replace("\"", "").replace("'", "") == "mieru"
         }
         if (mieruTypeIndex == -1) {
             throw IllegalArgumentException("No mieru proxy found in configuration")
@@ -145,8 +146,13 @@ object LinkParser {
         var i = startIndex
         while (i < lines.size) {
             val line = lines[i]
-            if (i > startIndex && (line.startsWith("-") || line.isEmpty() || line.startsWith("proxy-groups:") || line.startsWith("rules:"))) {
+            if (i > startIndex && (line.startsWith("-") || line.startsWith("proxy-groups:") || line.startsWith("rules:") || line.startsWith("proxies:"))) {
                 break
+            }
+
+            if (line.isEmpty() || line.startsWith("#")) {
+                i++
+                continue
             }
 
             val cleanLine = if (line.startsWith("-")) line.removePrefix("-").trim() else line
