@@ -247,7 +247,7 @@ fun DashboardScreen(
                         val clipboardText = clipboard.getText()?.text
                         if (!clipboardText.isNullOrBlank()) {
                             val trimmed = clipboardText.trim()
-                            if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") || trimmed.contains("type: mieru") || trimmed.contains("type: \"mieru\"") || trimmed.contains("type: 'mieru'")) {
+                            if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                                 val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
                                 if (duplicate != null) {
                                     viewModel.selectConfig(duplicate)
@@ -290,7 +290,7 @@ fun DashboardScreen(
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
                                     val trimmed = rawValue.trim()
-                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") || trimmed.contains("type: mieru") || trimmed.contains("type: \"mieru\"") || trimmed.contains("type: 'mieru'")) {
+                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                                         val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
                                         if (duplicate != null) {
                                             viewModel.selectConfig(duplicate)

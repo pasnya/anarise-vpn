@@ -156,9 +156,6 @@ object MieruEngine {
         json.put("rpcPort", 20810)
         json.put("socks5Port", SOCKS_PORT)
         json.put("socks5ListenLAN", false)
-        json.put("socks5UDPAssociate", true)
-        json.put("httpProxyPort", 0)
-        json.put("httpProxyListenLAN", false)
         json.put("loggingLevel", "INFO")
 
         return json.toString(2)

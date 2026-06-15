@@ -226,7 +226,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun parseHostPort(link: String): Pair<String, Int>? {
         try {
             val trimmed = link.trim()
-            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") || trimmed.contains("type: mieru")) {
+            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                 val parsed = io.github.vyomtunnel.sdk.utils.LinkParser.parse(trimmed)
                 val obj = org.json.JSONObject(parsed)
                 return Pair(obj.getString("server_host"), obj.getInt("server_port"))
@@ -387,12 +387,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         } catch (e: Exception) {
             content
         }
-
         val trimmedDecoded = decoded.trim()
-        if (trimmedDecoded.contains("type: mieru") || trimmedDecoded.contains("type: \"mieru\"") || trimmedDecoded.contains("type: 'mieru'")) {
-            return listOf(trimmedDecoded)
-        }
-
         return trimmedDecoded.split(Regex("[\r\n]+"))
             .map { it.trim() }
             .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") || it.startsWith("mieru://") || it.startsWith("mierus://") }

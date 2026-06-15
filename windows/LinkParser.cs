@@ -52,8 +52,6 @@ namespace Anarise
                 return ParseHysteria2(trimmed);
             if (trimmed.StartsWith("mieru://") || trimmed.StartsWith("mierus://"))
                 return ParseMieru(trimmed);
-            if (trimmed.Contains("type: mieru") || trimmed.Contains("type: \"mieru\"") || trimmed.Contains("type: 'mieru'"))
-                return ParseMieruYaml(trimmed);
 
             throw new ArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy, Hysteria2 and Mieru are supported");
         }
@@ -158,87 +156,7 @@ namespace Anarise
             }
         }
 
-        private static string ParseMieruYaml(string yaml)
-        {
-            var lines = yaml.Split(new[] { '\r', '\n' }, StringSplitOptions.None);
-            int mieruTypeIndex = -1;
-            for (int k = 0; k < lines.Length; k++)
-            {
-                string line = lines[k].Trim();
-                string cleanLine = line.StartsWith("-") ? line.Substring(1).Trim() : line;
-                if (cleanLine.StartsWith("type:") && cleanLine.Substring(5).Trim().Replace("\"", "").Replace("'", "") == "mieru")
-                {
-                    mieruTypeIndex = k;
-                    break;
-                }
-            }
 
-            if (mieruTypeIndex == -1)
-            {
-                throw new ArgumentException("No mieru proxy found in configuration");
-            }
-
-            int startIndex = mieruTypeIndex;
-            while (startIndex > 0 && !lines[startIndex].Trim().StartsWith("-"))
-            {
-                startIndex--;
-            }
-
-            var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            for (int k = startIndex; k < lines.Length; k++)
-            {
-                string line = lines[k].Trim();
-                if (k > startIndex && (line.StartsWith("-") || line.StartsWith("proxy-groups:") || line.StartsWith("rules:") || line.StartsWith("proxies:")))
-                {
-                    break;
-                }
-
-                if (string.IsNullOrEmpty(line) || line.StartsWith("#"))
-                {
-                    continue;
-                }
-
-                string cleanLine = line.StartsWith("-") ? line.Substring(1).Trim() : line;
-                int colonIndex = cleanLine.IndexOf(':');
-                if (colonIndex != -1)
-                {
-                    string key = cleanLine.Substring(0, colonIndex).Trim().Replace("\"", "").Replace("'", "");
-                    string val = cleanLine.Substring(colonIndex + 1).Trim().Replace("\"", "").Replace("'", "");
-                    fields[key] = val;
-                }
-            }
-
-            fields.TryGetValue("server", out var server);
-            if (string.IsNullOrEmpty(server)) throw new ArgumentException("Missing 'server' in mieru config");
-
-            fields.TryGetValue("port", out var portStr);
-            int port = int.TryParse(portStr, out int p) ? p : 443;
-
-            fields.TryGetValue("username", out var username);
-            if (string.IsNullOrEmpty(username)) throw new ArgumentException("Missing 'username' in mieru config");
-
-            fields.TryGetValue("password", out var password);
-            if (string.IsNullOrEmpty(password)) throw new ArgumentException("Missing 'password' in mieru config");
-
-            fields.TryGetValue("multiplexing", out var multiplexing);
-            if (string.IsNullOrEmpty(multiplexing)) multiplexing = "MULTIPLEXING_LOW";
-
-            fields.TryGetValue("transport", out var transport);
-            if (string.IsNullOrEmpty(transport)) transport = "TCP";
-
-            var configObj = new JsonObject
-            {
-                ["_protocol"] = PROTOCOL_MIERU,
-                ["server"] = $"{server}:{port}",
-                ["server_host"] = server,
-                ["server_port"] = port,
-                ["username"] = username,
-                ["password"] = password,
-                ["multiplexing"] = multiplexing,
-                ["transport"] = transport
-            };
-            return configObj.ToJsonString();
-        }
 
         private static string ParseHysteria2(string link)
         {

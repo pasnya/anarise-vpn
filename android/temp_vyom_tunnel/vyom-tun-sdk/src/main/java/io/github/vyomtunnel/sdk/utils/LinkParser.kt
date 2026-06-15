@@ -26,7 +26,6 @@ object LinkParser {
                 trimmed.startsWith("naive+https://") -> parseNaive(trimmed)
                 trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") -> parseHysteria2(trimmed)
                 trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") -> parseMieru(trimmed)
-                trimmed.contains("type: mieru") || trimmed.contains("type: \"mieru\"") || trimmed.contains("type: 'mieru'") -> parseMieruYaml(trimmed)
                 else -> throw IllegalArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy, Hysteria2 and Mieru are supported")
             }
         } catch (e: Exception) {
@@ -127,62 +126,6 @@ object LinkParser {
         }
     }
 
-    private fun parseMieruYaml(yaml: String): String {
-        val lines = yaml.lines().map { it.trim() }
-        val mieruTypeIndex = lines.indexOfFirst { line ->
-            val clean = if (line.startsWith("-")) line.removePrefix("-").trim() else line
-            clean.startsWith("type:") && clean.substringAfter("type:").trim().replace("\"", "").replace("'", "") == "mieru"
-        }
-        if (mieruTypeIndex == -1) {
-            throw IllegalArgumentException("No mieru proxy found in configuration")
-        }
-
-        var startIndex = mieruTypeIndex
-        while (startIndex > 0 && !lines[startIndex].startsWith("-")) {
-            startIndex--
-        }
-
-        val fields = mutableMapOf<String, String>()
-        var i = startIndex
-        while (i < lines.size) {
-            val line = lines[i]
-            if (i > startIndex && (line.startsWith("-") || line.startsWith("proxy-groups:") || line.startsWith("rules:") || line.startsWith("proxies:"))) {
-                break
-            }
-
-            if (line.isEmpty() || line.startsWith("#")) {
-                i++
-                continue
-            }
-
-            val cleanLine = if (line.startsWith("-")) line.removePrefix("-").trim() else line
-            val colonIndex = cleanLine.indexOf(":")
-            if (colonIndex != -1) {
-                val key = cleanLine.substring(0, colonIndex).trim().replace("\"", "").replace("'", "")
-                val value = cleanLine.substring(colonIndex + 1).trim().replace("\"", "").replace("'", "")
-                fields[key] = value
-            }
-            i++
-        }
-
-        val server = fields["server"] ?: throw IllegalArgumentException("Missing 'server' in mieru config")
-        val port = fields["port"]?.toIntOrNull() ?: 443
-        val username = fields["username"] ?: throw IllegalArgumentException("Missing 'username' in mieru config")
-        val password = fields["password"] ?: throw IllegalArgumentException("Missing 'password' in mieru config")
-        val multiplexing = fields["multiplexing"] ?: "MULTIPLEXING_LOW"
-        val transport = fields["transport"] ?: "TCP"
-
-        return JSONObject().apply {
-            put("_protocol", PROTOCOL_MIERU)
-            put("server", "$server:$port")
-            put("server_host", server)
-            put("server_port", port)
-            put("username", username)
-            put("password", password)
-            put("multiplexing", multiplexing)
-            put("transport", transport)
-        }.toString()
-    }
 
     /**
      * Parses a hysteria2:// or hy2:// URI into a JSON config envelope.

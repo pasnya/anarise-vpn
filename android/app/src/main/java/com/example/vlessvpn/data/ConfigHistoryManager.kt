@@ -15,7 +15,7 @@ object ConfigHistoryManager {
     fun extractConfigIdentity(link: String): String? {
         try {
             val trimmed = link.trim()
-            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://") || trimmed.contains("type: mieru") || trimmed.contains("type: \"mieru\"") || trimmed.contains("type: 'mieru'")) {
+            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                 val parsed = io.github.vyomtunnel.sdk.utils.LinkParser.parse(trimmed)
                 val obj = org.json.JSONObject(parsed)
                 val host = obj.getString("server_host")
