@@ -108,31 +108,7 @@ object MieruEngine {
         transport: String
     ): String {
         val json = JSONObject()
-        val profile = JSONObject().apply {
-            put("profileName", "default")
-            put("user", JSONObject().apply {
-                put("name", username)
-                put("password", password)
-            })
-            put("servers", JSONArray().put(
-                JSONObject().apply {
-                    put("ipAddress", server)
-                    put("domainName", "")
-                    put("portBindings", JSONArray().put(
-                        JSONObject().apply {
-                            put("port", 443)
-                            put("protocol", transport)
-                        }
-                    ))
-                }
-            ))
-            put("mtu", 1350)
-            put("multiplexing", JSONObject().apply {
-                put("level", multiplexing)
-            })
-            put("handshakeMode", "HANDSHAKE_STANDARD")
-        }
-
+        
         // Parse host and port from server string
         val host: String
         val port: Int
@@ -144,12 +120,36 @@ object MieruEngine {
             port = 443
         }
 
-        val serverArray = profile.getJSONArray("servers")
-        val serverObj = serverArray.getJSONObject(0)
-        serverObj.put("ipAddress", host)
-        val portBindings = serverObj.getJSONArray("portBindings")
-        val portObj = portBindings.getJSONObject(0)
-        portObj.put("port", port)
+        val isIp = host.matches(Regex("""^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$""")) || host.contains(":")
+        val ipAddressVal = if (isIp) host else ""
+        val domainNameVal = if (isIp) "" else host
+        val protoVal = transport.uppercase()
+        val multiplexingVal = multiplexing.uppercase()
+
+        val profile = JSONObject().apply {
+            put("profileName", "default")
+            put("user", JSONObject().apply {
+                put("name", username)
+                put("password", password)
+            })
+            put("servers", JSONArray().put(
+                JSONObject().apply {
+                    put("ipAddress", ipAddressVal)
+                    put("domainName", domainNameVal)
+                    put("portBindings", JSONArray().put(
+                        JSONObject().apply {
+                            put("port", port)
+                            put("protocol", protoVal)
+                        }
+                    ))
+                }
+            ))
+            put("mtu", 1350)
+            put("multiplexing", JSONObject().apply {
+                put("level", multiplexingVal)
+            })
+            put("handshakeMode", "HANDSHAKE_STANDARD")
+        }
 
         json.put("profiles", JSONArray().put(profile))
         json.put("activeProfile", "default")

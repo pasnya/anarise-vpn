@@ -42,7 +42,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.2.0";
+        private const string AppVersion = "1.3.0";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -430,7 +430,13 @@ namespace Anarise
                 if (isMieru)
                 {
                     var rawMieruConfig = JsonNode.Parse(parsedConfig).AsObject();
-                    
+                    string host = rawMieruConfig["server_host"]?.ToString() ?? "";
+                    bool isIp = IPAddress.TryParse(host, out _);
+                    string ipAddressVal = isIp ? host : "";
+                    string domainNameVal = isIp ? "" : host;
+                    string protoVal = (rawMieruConfig["transport"]?.ToString() ?? "TCP").ToUpper();
+                    string multiplexingVal = (rawMieruConfig["multiplexing"]?.ToString() ?? "MULTIPLEXING_LOW").ToUpper();
+
                     var profile = new JsonObject
                     {
                         ["profileName"] = "default",
@@ -441,18 +447,18 @@ namespace Anarise
                         },
                         ["servers"] = new JsonArray(new JsonObject
                         {
-                            ["ipAddress"] = rawMieruConfig["server_host"]?.ToString(),
-                            ["domainName"] = "",
+                            ["ipAddress"] = ipAddressVal,
+                            ["domainName"] = domainNameVal,
                             ["portBindings"] = new JsonArray(new JsonObject
                             {
                                 ["port"] = rawMieruConfig["server_port"]?.AsValue().GetValue<int>() ?? 443,
-                                ["protocol"] = rawMieruConfig["transport"]?.ToString() ?? "TCP"
+                                ["protocol"] = protoVal
                             })
                         }),
                         ["mtu"] = 1350,
                         ["multiplexing"] = new JsonObject
                         {
-                            ["level"] = rawMieruConfig["multiplexing"]?.ToString() ?? "MULTIPLEXING_LOW"
+                            ["level"] = multiplexingVal
                         },
                         ["handshakeMode"] = "HANDSHAKE_STANDARD"
                     };
