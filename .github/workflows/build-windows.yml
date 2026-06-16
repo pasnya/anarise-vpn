@@ -1,0 +1,48 @@
+name: Build Windows Client
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to upload to'
+        required: true
+        default: 'v1.3.2'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Publish Windows Client
+      run: |
+        dotnet publish windows/Anarise.csproj -c Release -r win-x64 --self-contained false -o publish
+
+    - name: Zip Artifact
+      shell: pwsh
+      run: |
+        Compress-Archive -Path publish\* -DestinationPath AnariseVPN-Windows-x64.zip
+
+    - name: Upload to Release
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        $tag = "${{ github.event.inputs.tag }}"
+        if ([string]::IsNullOrEmpty($tag)) {
+          $tag = "${{ github.ref_name }}"
+        }
+        gh release upload $tag AnariseVPN-Windows-x64.zip --clobber
