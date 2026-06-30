@@ -615,7 +615,6 @@ function renderAllLogs() {
 // --- FORMATTER UTILS ---
 function getDisplayLabel(link) {
     try {
-        let decoded = link;
         if (link.startsWith("vmess://")) {
             const raw = link.replace("vmess://", "");
             const jsonStr = atob(raw);
@@ -628,7 +627,16 @@ function getDisplayLabel(link) {
             return decodeURIComponent(link.substring(hashIdx + 1));
         }
 
-        // Fallback to parsing Host
+        if (link.startsWith("mieru://") || link.startsWith("mierus://")) {
+            try {
+                const normalized = link.replace("mierus://", "http://").replace("mieru://", "http://");
+                const url = new URL(normalized);
+                return url.hostname;
+            } catch (e2) {
+                return "Mieru Server";
+            }
+        }
+
         const url = new URL(link.replace("naive+", ""));
         return url.hostname;
     } catch (e) {
@@ -638,15 +646,27 @@ function getDisplayLabel(link) {
 
 function getProtocolHost(link) {
     try {
-        let protocol = "vless";
-        let host = "";
-
         if (link.startsWith("vmess://")) {
             const raw = link.replace("vmess://", "");
             const jsonStr = atob(raw);
             const data = JSON.parse(jsonStr);
             return `vmess | ${data.add}:${data.port}`;
         }
+
+        if (link.startsWith("mieru://") || link.startsWith("mierus://")) {
+            let host = "unknown";
+            try {
+                const normalized = link.replace("mierus://", "http://").replace("mieru://", "http://");
+                const url = new URL(normalized);
+                host = url.hostname;
+                const port = url.port || 443;
+                return `mieru | ${host}:${port}`;
+            } catch (e2) {
+                return `mieru | ${host}`;
+            }
+        }
+
+        let protocol = "vless";
 
         if (link.startsWith("vless://")) protocol = "vless";
         else if (link.startsWith("naive+https://")) protocol = "naive";

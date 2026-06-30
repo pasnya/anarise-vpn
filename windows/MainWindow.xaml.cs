@@ -561,8 +561,12 @@ namespace Anarise
                     return;
                 }
 
-                if (vpnMode)
+                if (vpnMode || isMieru)
                 {
+                    if (isMieru && !vpnMode)
+                    {
+                        LogToUi("Mieru использует только SOCKS5 — запуск VPN-туннеля автоматически...");
+                    }
                     LogToUi("Запуск VPN-туннеля (TUN)...");
                     bool tunStarted = await StartTun2Socks();
                     if (gen != connectionGeneration) return;
