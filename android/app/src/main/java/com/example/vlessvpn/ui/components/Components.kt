@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -37,7 +38,8 @@ fun ServerCard(
     pingLoading: Boolean,
     onSelect: () -> Unit,
     onDelete: (() -> Unit)? = null,
-    onPingCheck: () -> Unit
+    onPingCheck: () -> Unit,
+    onShare: (() -> Unit)? = null
 ) {
     Card(
         modifier = Modifier
@@ -112,6 +114,16 @@ fun ServerCard(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )
+                }
+                if (onShare != null) {
+                    IconButton(onClick = onShare) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Поделиться",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
                 if (onDelete != null) {
                     IconButton(onClick = onDelete) {

@@ -543,6 +543,28 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
     }
     card.appendChild(pingArea);
 
+    // Action buttons area
+    const actionsDiv = document.createElement('div');
+    actionsDiv.className = 'server-actions';
+    actionsDiv.style.display = 'flex';
+    actionsDiv.style.gap = '4px';
+    actionsDiv.style.alignItems = 'center';
+
+    // Copy/Share button
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'btn-delete-server';
+    copyBtn.title = 'Копировать ссылку';
+    copyBtn.innerHTML = `
+        <svg viewBox="0 0 24 24" width="16" height="16">
+            <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+        </svg>
+    `;
+    copyBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        sendToHost('copyToClipboard', { text: link });
+    });
+    actionsDiv.appendChild(copyBtn);
+
     // Delete Button
     if (showDelete) {
         const delBtn = document.createElement('button');
@@ -559,9 +581,10 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
                 sendToHost('deleteConfig', { link });
             }
         });
-        card.appendChild(delBtn);
+        actionsDiv.appendChild(delBtn);
     }
 
+    card.appendChild(actionsDiv);
     return card;
 }
 

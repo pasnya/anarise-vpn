@@ -543,7 +543,14 @@ fun DashboardScreen(
                             activity?.let { viewModel.connect(it) }
                         },
                         onDelete = { viewModel.deleteConfigFromHistory(item) },
-                        onPingCheck = { viewModel.checkServerPing(item) }
+                        onPingCheck = { viewModel.checkServerPing(item) },
+                        onShare = {
+                            val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_TEXT, item)
+                            }
+                            context.startActivity(android.content.Intent.createChooser(sendIntent, "Поделиться конфигурацией"))
+                        }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
@@ -632,7 +639,14 @@ fun DashboardScreen(
                             activity?.let { viewModel.connect(it) }
                         },
                         onDelete = null,
-                        onPingCheck = { viewModel.checkServerPing(item) }
+                        onPingCheck = { viewModel.checkServerPing(item) },
+                        onShare = {
+                            val sendIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                type = "text/plain"
+                                putExtra(android.content.Intent.EXTRA_TEXT, item)
+                            }
+                            context.startActivity(android.content.Intent.createChooser(sendIntent, "Поделиться конфигурацией"))
+                        }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                 }
