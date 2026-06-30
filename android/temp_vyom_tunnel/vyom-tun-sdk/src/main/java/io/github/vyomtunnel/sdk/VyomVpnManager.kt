@@ -11,13 +11,11 @@ import android.os.Build
 import android.util.Log
 import android.webkit.WebView
 import android.widget.Toast
-import androidx.annotation.RequiresApi
 import io.github.vyomtunnel.core.NativeEngine
 import io.github.vyomtunnel.sdk.models.VyomIpInfo
 import io.github.vyomtunnel.sdk.utils.AssetUtils
 import io.github.vyomtunnel.sdk.utils.LinkParser
 import io.github.vyomtunnel.sdk.utils.VyomLogger
-import kotlin.coroutines.coroutineContext
 
 object VyomVpnManager {
 
@@ -128,7 +126,6 @@ object VyomVpnManager {
             return
         }
 
-//        val intent = VpnService.prepare(activity)
         val vpnIntent = VpnService.prepare(activity)
 
         val hasNotificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -281,19 +278,6 @@ object VyomVpnManager {
 
     // --- DIAGNOSTICS & HELPERS ---
 
-    fun checkInternet(callback: (Boolean) -> Unit) {
-        kotlin.concurrent.thread {
-            try {
-                val conn = java.net.URL("http://connectivitycheck.gstatic.com/generate_204")
-                    .openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 3000
-                callback(conn.responseCode == 204)
-            } catch (e: Exception) {
-                callback(false)
-            }
-        }
-    }
-
 
 
     fun setNotificationConfig(config: VyomNotificationConfig) {
@@ -328,15 +312,6 @@ object VyomVpnManager {
             .getBoolean(KEY_KILL_SWITCH, false)
     }
 
-    fun getCoreLogs(): String {
-        return try {
-            val process = Runtime.getRuntime().exec("logcat -d -t 1000")
-            process.inputStream.bufferedReader().use { it.readText() }
-        } catch (e: Exception) {
-            "Failed to fetch logs: ${e.message}"
-        }
-    }
-
     fun fetchIpInfo(callback: (VyomIpInfo?) -> Unit) {
         kotlin.concurrent.thread {
             try {
@@ -352,7 +327,6 @@ object VyomVpnManager {
 
                 val response = conn.inputStream.bufferedReader().use { it.readText() }
 
-                val obj = org.json.JSONObject(response)
                 val info = VyomIpInfo.fromJson(response)
                 callback(info)
             } catch (e: Exception) {

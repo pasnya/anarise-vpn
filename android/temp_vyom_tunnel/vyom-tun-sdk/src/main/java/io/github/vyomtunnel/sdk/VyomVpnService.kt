@@ -582,13 +582,6 @@ class VyomVpnService : TProxyService() {
     override fun onCreate() {
         super.onCreate()
         NativeEngine.vpnService = this
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            try {
-                android.webkit.WebView.setDataDirectorySuffix("xray_process")
-            } catch (e: Exception) {
-                VyomLogger.e(this, e.message.toString())
-            }
-        }
         val request = NetworkRequest.Builder()
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()

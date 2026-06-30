@@ -376,9 +376,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun fetchSubscriptionContent(url: String): String = withContext(Dispatchers.IO) {
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
-        connection.connectTimeout = 10000
-        connection.readTimeout = 10000
-        connection.inputStream.bufferedReader().use { it.readText() }
+        try {
+            connection.connectTimeout = 10000
+            connection.readTimeout = 10000
+            connection.inputStream.bufferedReader().use { it.readText() }
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun parseSubscriptionContent(content: String): List<String> {
@@ -444,7 +448,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         "https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt",
         "https://github.com/skywrt/v2ray-configs/raw/main/All_Configs_Sub.txt",
         "https://raw.githubusercontent.com/skywrt/v2ray-Collector/master/v2ray",
-        "https://raw.githubusercontent.com/skywrt/v2"
+        "https://raw.githubusercontent.com/skywrt/v2ray-Configs/refs/heads/main/Splitted-By-Protocol/vless.txt"
     )
 
     fun fetchAndCheckExternalConfigs() {
