@@ -153,10 +153,14 @@ class VyomVpnService : TProxyService() {
                     }
                 )
 
-                // Give Mieru time to start its SOCKS5 listener
-                Thread.sleep(1000)
+                if (!waitForSocks5(20808, 5000)) {
+                    VyomLogger.e(this, "SOCKS5 proxy not available after Mieru start, aborting")
+                    MieruEngine.stop()
+                    notifyStatus(VyomState.ERROR)
+                    return@thread
+                }
 
-                VyomLogger.i(this, "Mieru started, setting up TUN")
+                VyomLogger.i(this, "Mieru started, SOCKS5 ready, setting up TUN")
 
                 // Resolve server addresses for routing
                 val resolvedAddresses = try {
@@ -285,10 +289,14 @@ class VyomVpnService : TProxyService() {
                     }
                 )
 
-                // Give Hysteria2 time to start its SOCKS5 listener
-                Thread.sleep(1000)
+                if (!waitForSocks5(20808, 5000)) {
+                    VyomLogger.e(this, "SOCKS5 proxy not available after Hysteria2 start, aborting")
+                    HysteriaEngine.stop()
+                    notifyStatus(VyomState.ERROR)
+                    return@thread
+                }
 
-                VyomLogger.i(this, "Hysteria2 started, setting up TUN")
+                VyomLogger.i(this, "Hysteria2 started, SOCKS5 ready, setting up TUN")
 
                 // Resolve server addresses for routing
                 val resolvedAddresses = try {
@@ -395,6 +403,13 @@ class VyomVpnService : TProxyService() {
                 val result = NativeEngine.startXray(xrayConfig, assetPath)
                 VyomLogger.i(this, "Xray started: $result")
 
+                if (!waitForSocks5(20808, 5000)) {
+                    VyomLogger.e(this, "SOCKS5 proxy not available after 5s, aborting")
+                    NativeEngine.stopXray()
+                    notifyStatus(VyomState.ERROR)
+                    return@thread
+                }
+
                 // Resolve DNS/domain name of the server to IP address(es) to avoid IllegalArgumentException in addRoute
                 val resolvedAddresses = try {
                     java.net.InetAddress.getAllByName(serverIp).map { it.hostAddress }
@@ -480,6 +495,22 @@ class VyomVpnService : TProxyService() {
                 notifyStatus(VyomState.ERROR)
             }
         }
+    }
+
+    private fun waitForSocks5(port: Int, timeoutMs: Long): Boolean {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                val socket = java.net.Socket()
+                socket.connect(java.net.InetSocketAddress("127.0.0.1", port), 500)
+                socket.close()
+                VyomLogger.i(this, "SOCKS5 on port $port is ready")
+                return true
+            } catch (_: Exception) {
+                Thread.sleep(200)
+            }
+        }
+        return false
     }
 
     private fun stopVpn() {
