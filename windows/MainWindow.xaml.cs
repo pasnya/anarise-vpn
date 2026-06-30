@@ -42,7 +42,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.3.3";
+        private const string AppVersion = "1.3.4";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
