@@ -44,13 +44,17 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.0";
+        private const string AppVersion = "1.4.1";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
         private string savedDefaultGateway = null;
         private string savedServerIp = null;
         private int connectionGeneration = 0;
+
+        // DNS management
+        private string savedDnsServer = null;
+        private string savedNetworkInterface = null;
 
         // Path variables
         private string appDataPath;
@@ -93,6 +97,7 @@ namespace Anarise
                 StopTun2Socks();
                 StopTunnelCore();
                 SystemProxyManager.DisableProxy();
+                _ = RestoreSystemDns();
             };
         }
 
@@ -592,6 +597,7 @@ namespace Anarise
                 {
                     LogToUi("Настройка системного прокси...");
                     SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
+                    await SaveAndSetSystemDns();
                 }
 
                 if (gen != connectionGeneration) return;
@@ -629,6 +635,7 @@ namespace Anarise
             StopTun2Socks();
             StopTunnelCore();
             SystemProxyManager.DisableProxy();
+            _ = RestoreSystemDns();
             LogToUi("Соединение разорвано.");
         }
 
@@ -792,6 +799,63 @@ namespace Anarise
                 }
             }
             catch { }
+        }
+
+        // --- DNS MANAGEMENT ---
+        private async Task SaveAndSetSystemDns()
+        {
+            try
+            {
+                // Find the active non-anarise network interface
+                var nics = NetworkInterface.GetAllNetworkInterfaces();
+                foreach (var nic in nics)
+                {
+                    if (nic.OperationalStatus != OperationalStatus.Up) continue;
+                    if (nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                    if (nic.Name.Contains("anarise", StringComparison.OrdinalIgnoreCase)) continue;
+
+                    var props = nic.GetIPProperties();
+                    var dnsServers = props.DnsAddresses.Where(d => d.AddressFamily == AddressFamily.InterNetwork).ToList();
+                    if (dnsServers.Count > 0)
+                    {
+                        savedDnsServer = dnsServers[0].ToString();
+                        savedNetworkInterface = nic.Name;
+                        break;
+                    }
+                }
+
+                if (!string.IsNullOrEmpty(savedNetworkInterface))
+                {
+                    LogToUi($"Сохранён DNS: {savedDnsServer} ({savedNetworkInterface})");
+                    await RunNetshAsync($"interface ip set dns \"{savedNetworkInterface}\" static 127.0.0.1 primary");
+                    LogToUi("Системный DNS перенаправлен на 127.0.0.1 (DNS через прокси)");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogToUi("Ошибка настройки DNS: " + ex.Message);
+            }
+        }
+
+        private async Task RestoreSystemDns()
+        {
+            if (string.IsNullOrEmpty(savedNetworkInterface) || string.IsNullOrEmpty(savedDnsServer))
+                return;
+
+            try
+            {
+                await RunNetshAsync($"interface ip set dns \"{savedNetworkInterface}\" static {savedDnsServer} primary");
+                LogToUi($"DNS восстановлен: {savedDnsServer}");
+            }
+            catch (Exception ex)
+            {
+                LogToUi("Ошибка восстановления DNS: " + ex.Message);
+            }
+            finally
+            {
+                savedDnsServer = null;
+                savedNetworkInterface = null;
+            }
         }
 
         private async Task RunNetshAsync(string arguments, bool ignoreError = false)

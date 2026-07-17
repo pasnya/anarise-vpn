@@ -417,7 +417,23 @@ namespace Anarise
             };
 
             var inbounds = new JsonArray();
-            
+
+            // DNS Inbound — intercepts system DNS queries so browser resolves through the proxy
+            var dnsInbound = new JsonObject
+            {
+                ["listen"] = "127.0.0.1",
+                ["port"] = 20853,
+                ["protocol"] = "dns",
+                ["settings"] = new JsonObject
+                {
+                    ["udp"] = new JsonObject
+                    {
+                        ["interface"] = "127.0.0.1"
+                    }
+                }
+            };
+            inbounds.Add(dnsInbound);
+
             // SOCKS Inbound
             var socksInbound = new JsonObject
             {
@@ -593,6 +609,7 @@ namespace Anarise
             // Routing
             var rules = new JsonArray();
             rules.Add(new JsonObject { ["type"] = "field", ["port"] = "53", ["outboundTag"] = "dns-out" });
+            rules.Add(new JsonObject { ["type"] = "field", ["port"] = "20853", ["outboundTag"] = "dns-out" });
             rules.Add(new JsonObject { ["type"] = "field", ["ip"] = new JsonArray("geoip:private"), ["outboundTag"] = "direct" });
 
             if (protocol == "http")
