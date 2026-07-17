@@ -1,0 +1,49 @@
+name: Build Android Client
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to upload to'
+        required: true
+        default: 'v1.3.5'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x android/gradlew
+
+    - name: Build Release APK
+      working-directory: android
+      run: ./gradlew assembleRelease
+
+    - name: Upload to Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        tag="${{ github.event.inputs.tag }}"
+        if [ -z "$tag" ]; then
+          tag="${{ github.ref_name }}"
+        fi
+        gh release upload "$tag" android/app/build/outputs/apk/release/app-release.apk --clobber

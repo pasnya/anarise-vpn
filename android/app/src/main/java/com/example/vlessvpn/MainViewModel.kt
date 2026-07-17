@@ -10,6 +10,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import com.example.vlessvpn.data.ConfigHistoryManager
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
@@ -88,12 +89,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         override fun onLogReceived(message: String) {
-            val current = _logs.value.toMutableList()
-            current.add(message)
-            if (current.size > 500) {
-                current.removeAt(0)
+            _logs.update { current ->
+                val updated = current + message
+                if (updated.size > 500) updated.drop(1) else updated
             }
-            _logs.value = current
         }
     }
 
@@ -305,7 +304,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (needsTls) {
                 try {
                     val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
-                    // Trust all certs for ping check (same approach as Windows version)
+                    // SECURITY: Trust-all certificates used ONLY for ping latency measurement, NOT for VPN data traffic.
                     sslContext.init(null, arrayOf(object : javax.net.ssl.X509TrustManager {
                         override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>?, authType: String?) {}
                         override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>?, authType: String?) {}

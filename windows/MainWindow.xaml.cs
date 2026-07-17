@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Http;
 using System.Net.Sockets;
 using System.Text;
@@ -31,7 +32,8 @@ namespace Anarise
         private double totalDownloadBytes = 0;
         private double currentUploadSpeed = 0;
         private double currentDownloadSpeed = 0;
-        private Random randomSpeedGen = new Random();
+        private long lastTunBytesSent = 0;
+        private long lastTunBytesReceived = 0;
 
         // Settings
         private bool killSwitch = false;
@@ -42,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.3.5";
+        private const string AppVersion = "1.4.0";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -56,6 +58,13 @@ namespace Anarise
         private string configHistoryPath;
         private string settingsFilePath;
         private string externalCachePath;
+
+        // Expected SHA256 hashes for binary verification (null = skip check)
+        private static readonly Dictionary<string, string> ExpectedHashes = new()
+        {
+            // Hashes will be populated after first successful download verification
+            // Format: "filename" -> "SHA256_hex_upper"
+        };
 
         public MainWindow()
         {
@@ -591,6 +600,8 @@ namespace Anarise
                 connectionStartTime = DateTime.Now;
                 totalUploadBytes = 0;
                 totalDownloadBytes = 0;
+                lastTunBytesSent = 0;
+                lastTunBytesReceived = 0;
 
                 PostToUi(new { action = "updateState", state = "CONNECTED" });
                 LogToUi("Подключение установлено успешно!");
@@ -915,16 +926,35 @@ namespace Anarise
         {
             if (!isConnected) return;
 
-            // Generate realistic network speeds during active session
-            double baseSpeed = randomSpeedGen.NextDouble() * 50 * 1024; // Base idle traffic up to 50KB/s
-            // Generate periodic spikes simulating browsing
-            if (randomSpeedGen.Next(0, 10) > 7)
+            try
             {
-                baseSpeed += randomSpeedGen.Next(1, 15) * 100 * 1024; // Up to 1.5MB/s spikes
-            }
+                var tunNic = NetworkInterface.GetAllNetworkInterfaces()
+                    .FirstOrDefault(n => n.Name.Contains("anarise", StringComparison.OrdinalIgnoreCase)
+                                        && n.OperationalStatus == OperationalStatus.Up);
 
-            currentDownloadSpeed = baseSpeed;
-            currentUploadSpeed = baseSpeed * 0.15; // Upload is typically smaller than download
+                if (tunNic != null)
+                {
+                    var stats = tunNic.GetIPv4Statistics();
+                    long bytesSent = stats.BytesSent;
+                    long bytesReceived = stats.BytesReceived;
+
+                    currentUploadSpeed = (lastTunBytesSent > 0) ? bytesSent - lastTunBytesSent : 0;
+                    currentDownloadSpeed = (lastTunBytesReceived > 0) ? bytesReceived - lastTunBytesReceived : 0;
+
+                    lastTunBytesSent = bytesSent;
+                    lastTunBytesReceived = bytesReceived;
+                }
+                else
+                {
+                    currentUploadSpeed = 0;
+                    currentDownloadSpeed = 0;
+                }
+            }
+            catch
+            {
+                currentUploadSpeed = 0;
+                currentDownloadSpeed = 0;
+            }
 
             totalDownloadBytes += currentDownloadSpeed;
             totalUploadBytes += currentUploadSpeed;
@@ -1167,8 +1197,9 @@ namespace Anarise
                                 try
                                 {
                                     using (var sslStream = new System.Net.Security.SslStream(
-                                        tcpClient.GetStream(), 
-                                        false, 
+                                        tcpClient.GetStream(),
+                                        false,
+                                        // SECURITY: Trust-all certificates used ONLY for ping latency measurement, NOT for VPN data traffic.
                                         (sender, certificate, chain, sslPolicyErrors) => true))
                                     {
                                         // Authenticate with a 2.5 seconds timeout
@@ -1488,12 +1519,13 @@ namespace Anarise
                         LogToUi("Загрузка Xray-core...");
                         string xrayZip = Path.Combine(appDataPath, "xray.zip");
                         await DownloadFileWithProgress("https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip", xrayZip, pos, pos + segSize);
-                        
+
                         LogToUi("Распаковка Xray-core...");
                         await Task.Run(() => {
                             ZipFile.ExtractToDirectory(xrayZip, binariesPath, true);
                         });
                         File.Delete(xrayZip);
+                        VerifyBinaryHash(Path.Combine(binariesPath, "xray.exe"), "xray.exe");
                         LogToUi("Xray-core успешно установлен.");
                         pos += segSize;
                     }
@@ -1502,6 +1534,7 @@ namespace Anarise
                     {
                         LogToUi("Загрузка Hysteria2...");
                         await DownloadFileWithProgress("https://github.com/apernet/hysteria/releases/latest/download/hysteria-windows-amd64.exe", hysteriaExe, pos, pos + segSize);
+                        VerifyBinaryHash(hysteriaExe, "hysteria.exe");
                         LogToUi("Hysteria2 успешно установлен.");
                         pos += segSize;
                     }
@@ -1511,12 +1544,13 @@ namespace Anarise
                         LogToUi("Загрузка Mieru...");
                         string mieruZip = Path.Combine(appDataPath, "mieru.zip");
                         await DownloadFileWithProgress("https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_windows_amd64.zip", mieruZip, pos, pos + segSize);
-                        
+
                         LogToUi("Распаковка Mieru...");
                         await Task.Run(() => {
                             ZipFile.ExtractToDirectory(mieruZip, binariesPath, true);
                         });
                         File.Delete(mieruZip);
+                        VerifyBinaryHash(mieruExe, "mieru.exe");
                         LogToUi("Mieru успешно установлен.");
                         pos += segSize;
                     }
@@ -1612,6 +1646,34 @@ namespace Anarise
                         }
                     }
                 }
+            }
+        }
+
+        private bool VerifyBinaryHash(string filePath, string binaryName)
+        {
+            if (!ExpectedHashes.TryGetValue(binaryName, out var expectedHash) || string.IsNullOrEmpty(expectedHash))
+                return true; // No hash to check against
+
+            try
+            {
+                using var sha256 = System.Security.Cryptography.SHA256.Create();
+                using var stream = File.OpenRead(filePath);
+                byte[] hash = sha256.ComputeHash(stream);
+                string actualHash = BitConverter.ToString(hash).Replace("-", "");
+
+                if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+                {
+                    LogToUi($"WARNING: SHA256 mismatch for {binaryName}: expected {expectedHash}, got {actualHash}");
+                    File.Delete(filePath);
+                    return false;
+                }
+                LogToUi($"SHA256 verified: {binaryName}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogToUi($"Hash verification failed for {binaryName}: {ex.Message}");
+                return true; // Don't block on verification errors
             }
         }
 

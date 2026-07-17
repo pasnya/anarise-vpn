@@ -102,7 +102,7 @@ function handleHostMessage(msg) {
             syncSettingsUi();
             break;
         case 'showToast':
-            alert(msg.message); // Simple native alert for feedback
+            showToast(msg.message);
             break;
         case 'updateAvailable':
             showUpdateDialog(msg.version, msg.url);
@@ -596,10 +596,10 @@ function updateServerPingBadge(link, latency, loading) {
 // --- LOGS MANAGEMENT ---
 function appendLogLine(line) {
     appState.logs.push(line);
-    if (appState.logs.length > 300) {
+    if (appState.logs.length > 500) {
         appState.logs.shift();
     }
-    
+
     const view = document.getElementById('logs-view');
     const emptyLog = view.querySelector('.empty');
     if (emptyLog) emptyLog.remove();
@@ -610,7 +610,7 @@ function appendLogLine(line) {
     view.appendChild(lineDiv);
 
     // Remove excess DOM nodes to match array limit
-    while (view.children.length > 300) {
+    while (view.children.length > 500) {
         view.removeChild(view.firstChild);
     }
 
@@ -733,4 +733,24 @@ function getFlagEmoji(countryCode) {
     } catch (e) {
         return '🌐';
     }
+}
+
+// --- TOAST NOTIFICATIONS ---
+function showToast(message, durationMs = 3000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.innerText = message;
+    container.appendChild(toast);
+
+    // Trigger enter animation
+    requestAnimationFrame(() => toast.classList.add('show'));
+
+    setTimeout(() => {
+        toast.classList.remove('show');
+        toast.classList.add('hide');
+        toast.addEventListener('transitionend', () => toast.remove());
+    }, durationMs);
 }

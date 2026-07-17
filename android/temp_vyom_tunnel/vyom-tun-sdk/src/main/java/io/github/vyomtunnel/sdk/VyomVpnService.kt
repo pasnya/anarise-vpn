@@ -50,9 +50,6 @@ class VyomVpnService : TProxyService() {
     private var lastUp: Long = 0
     private var lastDown: Long = 0
     private var tunInterface: ParcelFileDescriptor? = null
-    private var healthCheckTimer: Timer? = null
-    private var lastTotalRx: Long = 0
-    private var noDataCount = 0
 
     private val connectivityManager by lazy {
         getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
@@ -515,7 +512,6 @@ class VyomVpnService : TProxyService() {
 
     private fun stopVpn() {
         notifyStatus(VyomState.STOPPING)
-        healthCheckTimer?.cancel()
 
         thread(start = true, name = "VyomShutdownThread") {
             try {
@@ -622,7 +618,6 @@ class VyomVpnService : TProxyService() {
     override fun onDestroy() {
         try {
             connectivityManager.unregisterNetworkCallback(networkCallback)
-            healthCheckTimer?.cancel()
         } catch (_: Exception) {}
         super.onDestroy()
     }
@@ -647,35 +642,6 @@ class VyomVpnService : TProxyService() {
         intent.putExtra("UP", up)
         intent.putExtra("DOWN", down)
         sendBroadcast(intent)
-    }
-
-    private fun startHealthGuard() {
-        healthCheckTimer?.cancel()
-        healthCheckTimer = Timer()
-        healthCheckTimer?.scheduleAtFixedRate(object : TimerTask() {
-            override fun run() {
-                val stats = this@VyomVpnService.TProxyGetStats()
-                if (stats.size >= 4) {
-                    val currentTotalRx = stats[3] // Total Received Bytes
-
-                    if (currentTotalRx > 0 && currentTotalRx == lastTotalRx) {
-                        noDataCount++
-                    } else {
-                        noDataCount = 0
-                    }
-
-                    lastTotalRx = currentTotalRx
-
-                    // If no new data for 10 seconds while connected
-                    if (noDataCount >= 20) {
-                        VyomLogger.e(this@VyomVpnService, "No internet traffic detected for 10s!", null)
-                        val intent = Intent(VyomVpnManager.ACTION_NO_INTERNET)
-                        sendBroadcast(intent)
-                        noDataCount = 0 // Reset to avoid spamming
-                    }
-                }
-            }
-        }, 10000L, 1000L) // Check every second after 10s delay
     }
 
     private fun extractServerIp(config: String): String? {
