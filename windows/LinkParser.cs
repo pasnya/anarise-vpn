@@ -423,14 +423,7 @@ namespace Anarise
             {
                 ["listen"] = "127.0.0.1",
                 ["port"] = 20853,
-                ["protocol"] = "dns",
-                ["settings"] = new JsonObject
-                {
-                    ["udp"] = new JsonObject
-                    {
-                        ["interface"] = "127.0.0.1"
-                    }
-                }
+                ["protocol"] = "dns"
             };
             inbounds.Add(dnsInbound);
 
