@@ -74,7 +74,7 @@ fun DashboardScreen(
     val currentVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.4.4"
+            pInfo.versionName ?: "1.4.5"
         } catch (e: Exception) {
             "1.1.0"
         }

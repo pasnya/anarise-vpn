@@ -6,6 +6,12 @@ namespace Anarise
 {
     public static class SystemProxyManager
     {
+        private sealed class RegistryValueSnapshot
+        {
+            public object Value { get; init; }
+            public RegistryValueKind Kind { get; init; }
+        }
+
         [DllImport("wininet.dll", SetLastError = true)]
         private static extern bool InternetSetOption(IntPtr hInternet, int dwOption, IntPtr lpBuffer, int dwBufferLength);
 
@@ -13,6 +19,13 @@ namespace Anarise
         private const int INTERNET_OPTION_REFRESH = 37;
 
         private const string REG_KEY_PATH = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
+        private const string QUIC_POLICY_VALUE = "QuicAllowed";
+        private static readonly string[] ChromiumPolicyPaths =
+        {
+            @"Software\Policies\Google\Chrome",
+            @"Software\Policies\Microsoft\Edge"
+        };
+        private static readonly Dictionary<string, RegistryValueSnapshot?> SavedQuicPolicies = new();
 
         public static void SetProxy(bool enabled, string server = "127.0.0.1:20809", bool bypassLan = true)
         {
@@ -75,6 +88,58 @@ namespace Anarise
         public static void DisableProxy()
         {
             SetProxy(false);
+        }
+
+        // HTTP system proxies do not tunnel QUIC/HTTP3 UDP traffic. Disable QUIC
+        // only while the proxy is active, then put the user's policy back exactly
+        // as it was before the connection.
+        public static void SetChromiumQuicAllowed(bool allowed)
+        {
+            foreach (var policyPath in ChromiumPolicyPaths)
+            {
+                try
+                {
+                    using var key = Registry.CurrentUser.CreateSubKey(policyPath, true);
+                    if (key == null) continue;
+
+                    if (!allowed)
+                    {
+                        if (!SavedQuicPolicies.ContainsKey(policyPath))
+                        {
+                            var existing = key.GetValue(QUIC_POLICY_VALUE);
+                            if (existing != null)
+                            {
+                                SavedQuicPolicies[policyPath] = new RegistryValueSnapshot
+                                {
+                                    Value = existing,
+                                    Kind = key.GetValueKind(QUIC_POLICY_VALUE)
+                                };
+                            }
+                            else
+                            {
+                                SavedQuicPolicies[policyPath] = null;
+                            }
+                        }
+
+                        key.SetValue(QUIC_POLICY_VALUE, 0, RegistryValueKind.DWord);
+                    }
+                    else if (SavedQuicPolicies.Remove(policyPath, out var saved))
+                    {
+                        if (saved != null)
+                        {
+                            key.SetValue(QUIC_POLICY_VALUE, saved.Value, saved.Kind);
+                        }
+                        else
+                        {
+                            key.DeleteValue(QUIC_POLICY_VALUE, false);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("Failed to update Chromium QUIC policy: " + ex.Message);
+                }
+            }
         }
 
         private static void NotifySystem()

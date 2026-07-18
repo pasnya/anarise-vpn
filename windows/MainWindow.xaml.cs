@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.4";
+        private const string AppVersion = "1.4.5";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -93,6 +93,7 @@ namespace Anarise
                 StopTun2Socks();
                 StopTunnelCore();
                 SystemProxyManager.DisableProxy();
+                SystemProxyManager.SetChromiumQuicAllowed(true);
             };
         }
 
@@ -603,6 +604,8 @@ namespace Anarise
                 {
                     LogToUi("Настройка системного прокси...");
                     SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
+                    SystemProxyManager.SetChromiumQuicAllowed(false);
+                    LogToUi("QUIC/HTTP3 временно отключён для Chrome и Edge. Перезапустите браузер, если он был открыт.");
                 }
 
                 if (gen != connectionGeneration) return;
@@ -640,6 +643,7 @@ namespace Anarise
             StopTun2Socks();
             StopTunnelCore();
             SystemProxyManager.DisableProxy();
+            SystemProxyManager.SetChromiumQuicAllowed(true);
             LogToUi("Соединение разорвано.");
         }
 
