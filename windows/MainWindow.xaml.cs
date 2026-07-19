@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.6";
+        private const string AppVersion = "1.4.7";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -64,6 +64,15 @@ namespace Anarise
         {
             // Hashes will be populated after first successful download verification
             // Format: "filename" -> "SHA256_hex_upper"
+        };
+
+        private static readonly HttpClient DnsOverHttpsClient = new(new HttpClientHandler
+        {
+            // DNS bootstrap must never use the Windows/system proxy or resolver.
+            UseProxy = false
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(5)
         };
 
         public MainWindow()
@@ -344,6 +353,8 @@ namespace Anarise
                     catch (Exception ex)
                     {
                         LogToUi("Ошибка разрешения DNS для Mieru: " + ex.Message);
+                        if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                        return;
                     }
                 }
                 else if (isHysteria)
@@ -370,6 +381,8 @@ namespace Anarise
                     catch (Exception ex)
                     {
                         LogToUi("Ошибка разрешения DNS для Hysteria: " + ex.Message);
+                        if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                        return;
                     }
                 }
                 else
@@ -428,6 +441,8 @@ namespace Anarise
                     catch (Exception ex)
                     {
                         LogToUi("Ошибка разрешения DNS для Xray: " + ex.Message);
+                        if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                        return;
                     }
                 }
 
@@ -989,9 +1004,9 @@ namespace Anarise
                         int colonIdx = server.LastIndexOf(':');
                         if (colonIdx > 0) server = server.Substring(0, colonIdx);
                         if (IPAddress.TryParse(server, out _)) return server;
-                        // Resolve hostname
-                        var addresses = Dns.GetHostAddresses(server);
-                        if (addresses.Length > 0) return addresses[0].ToString();
+                        // Do not fall back to the system resolver. Server hostnames
+                        // are resolved through DoH before this method is called.
+                        return null;
                     }
                 }
                 else
@@ -1006,8 +1021,8 @@ namespace Anarise
                         if (!string.IsNullOrEmpty(address))
                         {
                             if (IPAddress.TryParse(address, out _)) return address;
-                            var addresses = Dns.GetHostAddresses(address);
-                            if (addresses.Length > 0) return addresses[0].ToString();
+                            // Do not leak server lookups to the system DNS resolver.
+                            return null;
                         }
                     }
                 }
@@ -1132,12 +1147,11 @@ namespace Anarise
             LogToUi($"Разрешение адреса {hostname} через DoH...");
 
             // Try Cloudflare DoH (1.1.1.1) first
-            using (var client = new HttpClient())
             {
-                client.Timeout = TimeSpan.FromSeconds(5);
+                var client = DnsOverHttpsClient;
                 try
                 {
-                    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={hostname}&type=A");
+                    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={Uri.EscapeDataString(hostname)}&type=A");
                     request.Headers.Accept.Clear();
                     request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/dns-json"));
                     
@@ -1174,12 +1188,11 @@ namespace Anarise
             }
 
             // Fallback to Google DoH (8.8.8.8)
-            using (var client = new HttpClient())
             {
-                client.Timeout = TimeSpan.FromSeconds(5);
+                var client = DnsOverHttpsClient;
                 try
                 {
-                    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={hostname}&type=A");
+                    using var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={Uri.EscapeDataString(hostname)}&type=A");
                     request.Headers.Accept.Clear();
                     request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
                     
@@ -1215,8 +1228,7 @@ namespace Anarise
                 }
             }
 
-            LogToUi($"Не удалось разрешить {hostname} через DoH. Используется оригинальный хост.");
-            return hostname;
+            throw new InvalidOperationException($"Не удалось разрешить {hostname} через защищённый DoH. Локальный DNS не используется.");
         }
 
         // --- PING TESTING ---

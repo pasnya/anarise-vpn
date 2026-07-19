@@ -417,17 +417,6 @@ namespace Anarise
             var config = new JsonObject();
             config["log"] = new JsonObject { ["loglevel"] = "info" };
 
-            config["dns"] = new JsonObject
-            {
-                ["servers"] = new JsonArray(
-                    "https://1.1.1.1/dns-query",
-                    "https://8.8.8.8/dns-query",
-                    protocol == "http" ? "tcp://1.1.1.1" : "1.1.1.1",
-                    protocol == "http" ? "tcp://8.8.8.8" : "8.8.8.8"
-                ),
-                ["queryStrategy"] = "UseIPv4"
-            };
-
             var inbounds = new JsonArray();
 
             // SOCKS Inbound
@@ -616,19 +605,17 @@ namespace Anarise
 
             proxyOutbound["streamSettings"] = streamSettings;
 
-            var dnsOutbound = new JsonObject { ["tag"] = "dns-out", ["protocol"] = "dns" };
             var directOutbound = new JsonObject 
             { 
                 ["tag"] = "direct", 
                 ["protocol"] = "freedom",
-                ["settings"] = new JsonObject { ["domainStrategy"] = "UseIP" }
+                ["settings"] = new JsonObject { ["domainStrategy"] = "AsIs" }
             };
 
-            config["outbounds"] = new JsonArray(proxyOutbound, dnsOutbound, directOutbound);
+            config["outbounds"] = new JsonArray(proxyOutbound, directOutbound);
 
             // Routing
             var rules = new JsonArray();
-            rules.Add(new JsonObject { ["type"] = "field", ["port"] = "53", ["outboundTag"] = "dns-out" });
             rules.Add(new JsonObject { ["type"] = "field", ["ip"] = new JsonArray("geoip:private"), ["outboundTag"] = "direct" });
 
             if (protocol == "http")
@@ -643,7 +630,9 @@ namespace Anarise
 
             config["routing"] = new JsonObject
             {
-                ["domainStrategy"] = "IPIfNonMatch",
+                // Keep destination names intact so the remote proxy resolves them.
+                // This prevents local/system DNS lookups while connected.
+                ["domainStrategy"] = "AsIs",
                 ["rules"] = rules
             };
 
