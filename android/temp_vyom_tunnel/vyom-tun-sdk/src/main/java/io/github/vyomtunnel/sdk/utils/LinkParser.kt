@@ -193,6 +193,7 @@ object LinkParser {
             sni = params["sni"].orEmpty(),
             network = params["type"] ?: "tcp",
             flow = params["flow"].orEmpty(),
+            encryption = params["encryption"].orEmpty().ifEmpty { "none" },
             path = params["path"].orEmpty(),
             publicKey = params["pbk"].orEmpty(),
             shortId = params["sid"].orEmpty(),
@@ -264,6 +265,7 @@ object LinkParser {
         sni: String,
         network: String,
         flow: String,
+        encryption: String = "",
         path: String = "",
         headerType: String = "",
         publicKey: String = "",
@@ -346,7 +348,9 @@ object LinkParser {
                         put("users", JSONArray().put(
                             JSONObject().apply {
                                 put("id", uuid)
-                                put("encryption", if (protocol == "vless") "none" else "auto")
+                                // Preserve modern VLESS ML-KEM / 0-RTT
+                                // negotiation data from the share link.
+                                put("encryption", if (protocol == "vless") encryption.ifEmpty { "none" } else "auto")
                                 if (flow.isNotEmpty()) put("flow", flow)
                             }
                         ))

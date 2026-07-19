@@ -253,6 +253,8 @@ namespace Anarise
             if (string.IsNullOrEmpty(network)) network = "tcp";
 
             queryParams.TryGetValue("flow", out var flow);
+            queryParams.TryGetValue("encryption", out var encryption);
+            if (string.IsNullOrEmpty(encryption)) encryption = "none";
             queryParams.TryGetValue("path", out var path);
             queryParams.TryGetValue("pbk", out var publicKey);
             queryParams.TryGetValue("sid", out var shortId);
@@ -283,6 +285,7 @@ namespace Anarise
                 sni: sni ?? "",
                 network: network,
                 flow: flow ?? "",
+                encryption: encryption,
                 path: path ?? "",
                 publicKey: publicKey ?? "",
                 shortId: shortId ?? "",
@@ -401,6 +404,7 @@ namespace Anarise
             string sni,
             string network,
             string flow,
+            string encryption = "",
             string path = "",
             string headerType = "",
             string publicKey = "",
@@ -489,7 +493,12 @@ namespace Anarise
                 var userObj = new JsonObject
                 {
                     ["id"] = uuid,
-                    ["encryption"] = protocol == "vless" ? "none" : "auto"
+                    // Modern VLESS links may carry ML-KEM / 0-RTT encryption
+                    // negotiation data. Replacing it with "none" makes the
+                    // server close an otherwise valid XHTTP session.
+                    ["encryption"] = protocol == "vless"
+                        ? (string.IsNullOrEmpty(encryption) ? "none" : encryption)
+                        : "auto"
                 };
                 if (!string.IsNullOrEmpty(flow))
                 {
