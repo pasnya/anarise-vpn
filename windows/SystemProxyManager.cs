@@ -24,8 +24,8 @@ namespace Anarise
 
         private const string REG_KEY_PATH = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
         private const string QUIC_POLICY_VALUE = "QuicAllowed";
-        private const string QUIC_FIREWALL_GROUP = "Anarise VPN QUIC";
-        private const string IPV6_FIREWALL_GROUP = "Anarise VPN IPv6";
+        private const string QUIC_FIREWALL_RULE = "Anarise VPN - Block Browser QUIC";
+        private const string IPV6_FIREWALL_RULE = "Anarise VPN - Block IPv6";
         private static readonly string[] ChromiumPolicyPaths =
         {
             @"Software\Policies\Google\Chrome",
@@ -159,14 +159,15 @@ namespace Anarise
         // Firefox and Chromium-based browsers other than Chrome/Edge.
         public static bool SetBrowserQuicBlocked(bool blocked)
         {
-            DeleteFirewallGroup(QUIC_FIREWALL_GROUP);
+            DeleteFirewallRule(QUIC_FIREWALL_RULE);
             if (!blocked) return true;
 
-            int ruleIndex = 0;
             bool succeeded = false;
             foreach (var browserPath in FindBrowserExecutables())
             {
-                succeeded |= RunNetsh($"advfirewall firewall add rule name=\"Anarise VPN QUIC {++ruleIndex}\" group=\"{QUIC_FIREWALL_GROUP}\" dir=out action=block protocol=UDP remoteport=443 program=\"{browserPath}\" enable=yes profile=any");
+                // Windows allows multiple rules with the same display name; deleting
+                // by that name removes every per-browser rule in one operation.
+                succeeded |= RunNetsh($"advfirewall firewall add rule name=\"{QUIC_FIREWALL_RULE}\" dir=out action=block protocol=UDP remoteport=443 program=\"{browserPath}\" enable=yes profile=any");
             }
             return succeeded;
         }
@@ -175,10 +176,12 @@ namespace Anarise
         // prevents Windows from bypassing the IPv4 TUN/default-proxy path.
         public static bool SetIpv6Blocked(bool blocked)
         {
-            DeleteFirewallGroup(IPV6_FIREWALL_GROUP);
+            DeleteFirewallRule(IPV6_FIREWALL_RULE);
             if (!blocked) return true;
 
-            return RunNetsh($"advfirewall firewall add rule name=\"Anarise VPN - Block IPv6\" group=\"{IPV6_FIREWALL_GROUP}\" dir=out action=block remoteip=::/0 enable=yes profile=any");
+            // netsh rejects the zero-length IPv6 prefix (::/0) on some Windows
+            // builds. Two /1 prefixes cover the complete IPv6 address space.
+            return RunNetsh($"advfirewall firewall add rule name=\"{IPV6_FIREWALL_RULE}\" dir=out action=block remoteip=::/1,8000::/1 enable=yes profile=any");
         }
 
         private static IEnumerable<string> FindBrowserExecutables()
@@ -224,9 +227,9 @@ namespace Anarise
             return paths;
         }
 
-        private static void DeleteFirewallGroup(string group)
+        private static void DeleteFirewallRule(string name)
         {
-            RunNetsh($"advfirewall firewall delete rule name=all group=\"{group}\"");
+            RunNetsh($"advfirewall firewall delete rule name=\"{name}\"");
         }
 
         private static bool RunNetsh(string arguments)

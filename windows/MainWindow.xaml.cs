@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.8";
+        private const string AppVersion = "1.4.9";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -639,13 +639,27 @@ namespace Anarise
                 SystemProxyManager.SetChromiumQuicAllowed(false);
                 bool quicBlocked = SystemProxyManager.SetBrowserQuicBlocked(true);
                 bool ipv6Blocked = SystemProxyManager.SetIpv6Blocked(true);
-                if (!quicBlocked || !ipv6Blocked)
+                if (!quicBlocked)
                 {
-                    SystemProxyManager.SetBrowserQuicBlocked(false);
-                    SystemProxyManager.SetIpv6Blocked(false);
-                    throw new InvalidOperationException("Не удалось применить сетевую защиту QUIC/IPv6 через брандмауэр Windows.");
+                    // Keep the connection usable, like Throne: Xray routing and the
+                    // Chromium policy still provide QUIC fallback protection.
+                    LogToUi("Предупреждение: правило браузерного QUIC не применено; используется защита ядра Xray.");
                 }
-                LogToUi("QUIC/HTTP3 отключён, соединение ограничено IPv4.");
+                if (!ipv6Blocked)
+                {
+                    // The VPN server itself is still IPv4-only (DoH A lookup). Do
+                    // not fail a valid profile because a local firewall policy is
+                    // managed by an antivirus or domain administrator.
+                    LogToUi("Предупреждение: правило блокировки IPv6 не применено; транспорт VPN-сервера остаётся IPv4.");
+                }
+                if (quicBlocked && ipv6Blocked)
+                {
+                    LogToUi("QUIC/HTTP3 отключён, соединение ограничено IPv4.");
+                }
+                else
+                {
+                    LogToUi("Ядро запущено в IPv4-режиме; дополнительные правила Windows применены частично.");
+                }
 
                 if (gen != connectionGeneration) return;
 
