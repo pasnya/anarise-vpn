@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -258,11 +259,20 @@ namespace Anarise
             queryParams.TryGetValue("fp", out var fingerprint);
             if (string.IsNullOrEmpty(fingerprint)) fingerprint = "chrome";
 
+            queryParams.TryGetValue("alpn", out var alpn);
+
             queryParams.TryGetValue("host", out var requestHost);
             queryParams.TryGetValue("mode", out var mode);
             if (string.IsNullOrEmpty(mode)) mode = "auto";
 
             queryParams.TryGetValue("extra", out var extra);
+
+            bool allowInsecure = false;
+            if (queryParams.TryGetValue("allowInsecure", out var allowIns) ||
+                queryParams.TryGetValue("insecure", out allowIns))
+            {
+                allowInsecure = allowIns == "1" || allowIns.Equals("true", StringComparison.OrdinalIgnoreCase);
+            }
 
             return BuildConfigJson(
                 protocol: "vless",
@@ -277,10 +287,11 @@ namespace Anarise
                 publicKey: publicKey ?? "",
                 shortId: shortId ?? "",
                 fingerprint: fingerprint,
+                alpn: alpn ?? "",
                 requestHost: requestHost ?? "",
                 mode: mode,
                 extra: extra ?? "",
-                allowInsecure: false,
+                allowInsecure: allowInsecure,
                 socksPort: socksPort,
                 httpPort: httpPort
             );
@@ -398,6 +409,7 @@ namespace Anarise
             string requestHost = "",
             string mode = "auto",
             string extra = "",
+            string alpn = "",
             bool allowInsecure = false,
             int socksPort = 20808,
             int httpPort = 20809)
@@ -525,6 +537,17 @@ namespace Anarise
                 {
                     tlsSettings["allowInsecure"] = true;
                 }
+                if (!string.IsNullOrEmpty(fingerprint))
+                {
+                    tlsSettings["fingerprint"] = fingerprint;
+                }
+                if (!string.IsNullOrWhiteSpace(alpn))
+                {
+                    tlsSettings["alpn"] = new JsonArray(alpn
+                        .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                        .Select(value => JsonValue.Create(value.Trim()))
+                        .ToArray());
+                }
                 if (protocol == "http")
                 {
                     tlsSettings["alpn"] = new JsonArray("h2", "http/1.1");
@@ -545,7 +568,12 @@ namespace Anarise
 
             if (network == "ws")
             {
-                streamSettings["wsSettings"] = new JsonObject { ["path"] = path };
+                var wsSettings = new JsonObject { ["path"] = path };
+                if (!string.IsNullOrEmpty(requestHost))
+                {
+                    wsSettings["headers"] = new JsonObject { ["Host"] = requestHost };
+                }
+                streamSettings["wsSettings"] = wsSettings;
             }
             else if (network == "tcp" && headerType == "http")
             {
@@ -576,6 +604,14 @@ namespace Anarise
                     catch { }
                 }
                 streamSettings["xhttpSettings"] = xhttpSettings;
+            }
+            else if (network == "grpc")
+            {
+                streamSettings["grpcSettings"] = new JsonObject
+                {
+                    ["serviceName"] = path.TrimStart('/'),
+                    ["multiMode"] = string.Equals(mode, "multi", StringComparison.OrdinalIgnoreCase)
+                };
             }
 
             proxyOutbound["streamSettings"] = streamSettings;

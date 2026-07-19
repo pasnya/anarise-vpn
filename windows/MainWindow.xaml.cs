@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.5";
+        private const string AppVersion = "1.4.6";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -286,6 +286,13 @@ namespace Anarise
                 StopTunnelCore();
                 StopTun2Socks();
                 KillOrphanedProcesses();
+
+                if (!EnsureLocalPortsAvailable())
+                {
+                    LogToUi("Не удалось найти свободные локальные порты для прокси.");
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                    return;
+                }
 
                 if (gen != connectionGeneration) return;
 
@@ -807,6 +814,95 @@ namespace Anarise
                 }
             }
             catch { }
+        }
+
+        private bool EnsureLocalPortsAvailable()
+        {
+            try
+            {
+                int originalSocksPort = socksPort;
+                int originalHttpPort = httpPort;
+
+                if (!IsLocalPortAvailable(socksPort, requireUdp: true))
+                {
+                    socksPort = FindAvailableLocalPort(20808, requireUdp: true, excludedPort: httpPort);
+                    LogToUi($"SOCKS-порт {originalSocksPort} занят. Автоматически выбран порт {socksPort}.");
+                }
+
+                if (httpPort == socksPort || !IsLocalPortAvailable(httpPort, requireUdp: false))
+                {
+                    httpPort = FindAvailableLocalPort(20809, requireUdp: false, excludedPort: socksPort);
+                    LogToUi($"HTTP-порт {originalHttpPort} занят. Автоматически выбран порт {httpPort}.");
+                }
+
+                if (socksPort != originalSocksPort || httpPort != originalHttpPort)
+                {
+                    SaveSettings();
+                    PostToUi(new
+                    {
+                        action = "updateSettings",
+                        settings = new
+                        {
+                            killSwitch,
+                            autostart,
+                            autoreconnect,
+                            bypassLan,
+                            socksPort,
+                            httpPort,
+                            vpnMode,
+                            systemProxy
+                        }
+                    });
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogToUi("Ошибка проверки локальных портов: " + ex.Message);
+                return false;
+            }
+        }
+
+        private static int FindAvailableLocalPort(int preferredPort, bool requireUdp, int excludedPort)
+        {
+            for (int offset = 0; offset < 200; offset++)
+            {
+                int candidate = preferredPort + offset;
+                if (candidate > 65535 || candidate == excludedPort) continue;
+                if (IsLocalPortAvailable(candidate, requireUdp)) return candidate;
+            }
+
+            throw new InvalidOperationException("No free local proxy port was found.");
+        }
+
+        private static bool IsLocalPortAvailable(int port, bool requireUdp)
+        {
+            if (port < 1 || port > 65535) return false;
+
+            try
+            {
+                using var tcpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp)
+                {
+                    ExclusiveAddressUse = true
+                };
+                tcpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+
+                if (requireUdp)
+                {
+                    using var udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)
+                    {
+                        ExclusiveAddressUse = true
+                    };
+                    udpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                }
+
+                return true;
+            }
+            catch (SocketException)
+            {
+                return false;
+            }
         }
 
         private async Task RunNetshAsync(string arguments, bool ignoreError = false)
