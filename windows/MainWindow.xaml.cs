@@ -44,7 +44,10 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.10";
+        private const string AppVersion = "1.4.11";
+        private const string RequiredXrayVersion = "26.7.11";
+        private const string RequiredXrayDownloadUrl = "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-windows-64.zip";
+        private Task binariesSetupTask = Task.CompletedTask;
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -173,7 +176,8 @@ namespace Anarise
                 {
                     case "appReady":
                         await SyncSettingsAndHistory();
-                        CheckAndDownloadBinaries();
+                        binariesSetupTask = CheckAndDownloadBinaries();
+                        await binariesSetupTask;
                         CheckForUpdates();
                         break;
 
@@ -284,6 +288,8 @@ namespace Anarise
         // --- CORE PROCESS EXECUTION ---
         private async Task StartConnection()
         {
+            await binariesSetupTask;
+
             if (string.IsNullOrEmpty(currentConfigLink))
             {
                 PostToUi(new { action = "showToast", message = "Пожалуйста, выберите или добавьте сервер!" });
@@ -326,8 +332,16 @@ namespace Anarise
 
                 bool isHysteria = LinkParser.IsHysteria2Config(parsedConfig);
                 bool isMieru = LinkParser.IsMieruConfig(parsedConfig);
+                bool useNativeXrayTun = vpnMode && !isHysteria && !isMieru;
                 string executable = isMieru ? "mieru.exe" : (isHysteria ? "hysteria.exe" : "xray.exe");
                 string exePath = Path.Combine(binariesPath, executable);
+
+                if (!isMieru && !isHysteria && !IsXrayVersionAtLeast(exePath, RequiredXrayVersion))
+                {
+                    LogToUi($"Для подключения требуется Xray {RequiredXrayVersion} или новее. Перезапустите приложение для обновления модулей.");
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                    return;
+                }
 
                 if (!File.Exists(exePath))
                 {
@@ -441,6 +455,11 @@ namespace Anarise
                                     }
                                 }
                             }
+                        }
+
+                        if (useNativeXrayTun)
+                        {
+                            AddNativeXrayTun(xrayConfig);
                         }
                         parsedConfig = xrayConfig.ToJsonString();
                     }
@@ -610,7 +629,14 @@ namespace Anarise
                     return;
                 }
 
-                if (vpnMode || isMieru)
+                if (useNativeXrayTun)
+                {
+                    // Xray owns the Wintun adapter, routes, DNS and outbound
+                    // interface binding. This avoids the Xray -> tun2socks ->
+                    // local SOCKS loop and matches modern open clients.
+                    LogToUi("VPN-туннель Xray активирован (IPv4, удалённый DNS).");
+                }
+                else if (vpnMode || isMieru)
                 {
                     if (isMieru && !vpnMode)
                     {
@@ -622,6 +648,7 @@ namespace Anarise
 
                     if (!tunStarted)
                     {
+                        StopTun2Socks();
                         LogToUi("Не удалось запустить VPN-туннель.");
                         StopTunnelCore();
                         PostToUi(new { action = "updateState", state = "ERROR" });
@@ -732,6 +759,35 @@ namespace Anarise
         }
 
         // --- TUN2SOCKS VPN TUNNEL ---
+        private static void AddNativeXrayTun(JsonObject xrayConfig)
+        {
+            var inbounds = xrayConfig["inbounds"]?.AsArray();
+            if (inbounds == null)
+            {
+                inbounds = new JsonArray();
+                xrayConfig["inbounds"] = inbounds;
+            }
+
+            // Xray configures the adapter atomically and binds every outbound
+            // socket to the real interface before installing the default route.
+            // Only IPv4 is advertised. Public resolvers are reached through the
+            // tunnel, so Windows never falls back to the LAN/router DNS.
+            inbounds.Insert(0, new JsonObject
+            {
+                ["tag"] = "tun-in",
+                ["protocol"] = "tun",
+                ["settings"] = new JsonObject
+                {
+                    ["name"] = "anarise-xray",
+                    ["mtu"] = 1500,
+                    ["gateway"] = new JsonArray("10.0.85.1/24"),
+                    ["dns"] = new JsonArray("1.1.1.1", "8.8.8.8"),
+                    ["autoSystemRoutingTable"] = new JsonArray("0.0.0.0/0"),
+                    ["autoOutboundsInterface"] = "auto"
+                }
+            });
+        }
+
         private async Task<bool> StartTun2Socks()
         {
             string tun2socksExe = Path.Combine(binariesPath, "tun2socks.exe");
@@ -779,18 +835,46 @@ namespace Anarise
                 }
 
                 // Configure TUN adapter IP
-                await RunNetshAsync("interface ip set address \"anarise\" static 10.0.85.1 255.255.255.0");
+                if (!await RunNetshAsync("interface ipv4 set address name=\"anarise\" source=static address=10.0.85.1 mask=255.255.255.0"))
+                {
+                    LogToUi("Не удалось назначить IPv4-адрес адаптеру anarise.");
+                    return false;
+                }
                 await Task.Delay(500);
+
+                if (!await RunNetshAsync("interface ipv4 set dnsservers name=\"anarise\" static address=1.1.1.1 register=none validate=no"))
+                {
+                    LogToUi("Не удалось назначить удалённый DNS адаптеру anarise.");
+                    return false;
+                }
+                await RunNetshAsync("interface ipv4 add dnsservers name=\"anarise\" address=8.8.8.8 index=2 validate=no", ignoreError: true);
 
                 // Route VPN server IP directly through real gateway
                 if (!string.IsNullOrEmpty(savedServerIp) && !string.IsNullOrEmpty(savedDefaultGateway))
                 {
-                    await RunRouteAsync($"add {savedServerIp} mask 255.255.255.255 {savedDefaultGateway} metric 2", ignoreError: true);
+                    await RunRouteAsync($"delete {savedServerIp}", ignoreError: true);
+                    if (!await RunRouteAsync($"add {savedServerIp} mask 255.255.255.255 {savedDefaultGateway} metric 2"))
+                    {
+                        LogToUi("Не удалось исключить VPN-сервер из туннельного маршрута.");
+                        return false;
+                    }
+                }
+                else
+                {
+                    LogToUi("Не удалось определить IPv4-шлюз для обходного маршрута VPN-сервера.");
+                    return false;
                 }
 
                 // Set default route through TUN
-                await RunNetshAsync("interface ip add route 0.0.0.0/1 \"anarise\" 10.0.85.1 metric=5", ignoreError: true);
-                await RunNetshAsync("interface ip add route 128.0.0.0/1 \"anarise\" 10.0.85.1 metric=5", ignoreError: true);
+                await RunNetshAsync("interface ipv4 delete route 0.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
+                await RunNetshAsync("interface ipv4 delete route 128.0.0.0/1 \"anarise\" 10.0.85.1", ignoreError: true);
+                bool lowerRouteAdded = await RunNetshAsync("interface ipv4 add route 0.0.0.0/1 \"anarise\" 10.0.85.1 metric=5");
+                bool upperRouteAdded = await RunNetshAsync("interface ipv4 add route 128.0.0.0/1 \"anarise\" 10.0.85.1 metric=5");
+                if (!lowerRouteAdded || !upperRouteAdded)
+                {
+                    LogToUi("Не удалось установить IPv4-маршруты VPN-туннеля.");
+                    return false;
+                }
 
                 LogToUi("VPN-туннель активирован.");
                 return true;
@@ -959,7 +1043,7 @@ namespace Anarise
             }
         }
 
-        private async Task RunNetshAsync(string arguments, bool ignoreError = false)
+        private async Task<bool> RunNetshAsync(string arguments, bool ignoreError = false)
         {
             try
             {
@@ -973,15 +1057,27 @@ namespace Anarise
                     RedirectStandardError = true
                 };
                 using var proc = Process.Start(psi);
+                if (proc == null) return false;
+                var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                var stderrTask = proc.StandardError.ReadToEndAsync();
                 await proc.WaitForExitAsync();
+                string output = (await stdoutTask).Trim();
+                string error = (await stderrTask).Trim();
+                if (proc.ExitCode != 0)
+                {
+                    if (!ignoreError) LogToUi($"netsh error ({proc.ExitCode}): {error}\n{output}".Trim());
+                    return false;
+                }
+                return true;
             }
             catch (Exception ex)
             {
                 if (!ignoreError) LogToUi("netsh error: " + ex.Message);
+                return false;
             }
         }
 
-        private async Task RunRouteAsync(string arguments, bool ignoreError = false)
+        private async Task<bool> RunRouteAsync(string arguments, bool ignoreError = false)
         {
             try
             {
@@ -995,11 +1091,23 @@ namespace Anarise
                     RedirectStandardError = true
                 };
                 using var proc = Process.Start(psi);
+                if (proc == null) return false;
+                var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+                var stderrTask = proc.StandardError.ReadToEndAsync();
                 await proc.WaitForExitAsync();
+                string output = (await stdoutTask).Trim();
+                string error = (await stderrTask).Trim();
+                if (proc.ExitCode != 0)
+                {
+                    if (!ignoreError) LogToUi($"route error ({proc.ExitCode}): {error}\n{output}".Trim());
+                    return false;
+                }
+                return true;
             }
             catch (Exception ex)
             {
                 if (!ignoreError) LogToUi("route error: " + ex.Message);
+                return false;
             }
         }
 
@@ -1170,6 +1278,7 @@ namespace Anarise
                     LogToUi("Не удалось получить информацию об IP: " + ex.Message);
                 }
             }
+
         }
 
         // --- DNS OVER HTTPS (DoH) RESOLUTION ---
@@ -1655,7 +1764,7 @@ namespace Anarise
         }
 
         // --- BINARY AUTO-DOWNLOADER ---
-        private async void CheckAndDownloadBinaries()
+        private async Task CheckAndDownloadBinaries()
         {
             string xrayExe = Path.Combine(binariesPath, "xray.exe");
             string hysteriaExe = Path.Combine(binariesPath, "hysteria.exe");
@@ -1663,7 +1772,10 @@ namespace Anarise
             string wintunDll = Path.Combine(binariesPath, "wintun.dll");
             string mieruExe = Path.Combine(binariesPath, "mieru.exe");
 
-            bool needsXray = !File.Exists(xrayExe) || !File.Exists(Path.Combine(binariesPath, "geoip.dat")) || !File.Exists(Path.Combine(binariesPath, "geosite.dat"));
+            bool needsXray = !File.Exists(xrayExe)
+                || !File.Exists(Path.Combine(binariesPath, "geoip.dat"))
+                || !File.Exists(Path.Combine(binariesPath, "geosite.dat"))
+                || !IsXrayVersionAtLeast(xrayExe, RequiredXrayVersion);
             bool needsHysteria = !File.Exists(hysteriaExe);
             bool needsTun2Socks = !File.Exists(tun2socksExe);
             bool needsWintun = !File.Exists(wintunDll);
@@ -1685,7 +1797,7 @@ namespace Anarise
                     {
                         LogToUi("Загрузка Xray-core...");
                         string xrayZip = Path.Combine(appDataPath, "xray.zip");
-                        await DownloadFileWithProgress("https://github.com/XTLS/Xray-core/releases/latest/download/Xray-windows-64.zip", xrayZip, pos, pos + segSize);
+                        await DownloadFileWithProgress(RequiredXrayDownloadUrl, xrayZip, pos, pos + segSize);
 
                         LogToUi("Распаковка Xray-core...");
                         await Task.Run(() => {
@@ -1693,6 +1805,10 @@ namespace Anarise
                         });
                         File.Delete(xrayZip);
                         VerifyBinaryHash(Path.Combine(binariesPath, "xray.exe"), "xray.exe");
+                        if (!IsXrayVersionAtLeast(xrayExe, RequiredXrayVersion))
+                        {
+                            throw new InvalidDataException($"Установлена неподдерживаемая версия Xray; требуется {RequiredXrayVersion} или новее.");
+                        }
                         LogToUi("Xray-core успешно установлен.");
                         pos += segSize;
                     }
@@ -1777,6 +1893,43 @@ namespace Anarise
                     MessageBox.Show("Ошибка скачивания модулей:\n" + ex.Message, "Ошибка");
                     PostToUi(new { action = "downloadProgress", downloading = false, progress = 0 });
                 }
+            }
+
+        }
+
+        private static bool IsXrayVersionAtLeast(string executablePath, string requiredVersion)
+        {
+            if (!File.Exists(executablePath) || !Version.TryParse(requiredVersion, out var minimum))
+                return false;
+
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = "version",
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                };
+                using var process = Process.Start(psi);
+                if (process == null) return false;
+                string output = process.StandardOutput.ReadToEnd();
+                process.WaitForExit(5000);
+                if (process.ExitCode != 0) return false;
+
+                const string marker = "Xray ";
+                int start = output.IndexOf(marker, StringComparison.OrdinalIgnoreCase);
+                if (start < 0) return false;
+                start += marker.Length;
+                int end = output.IndexOfAny(new[] { ' ', '\r', '\n' }, start);
+                string rawVersion = end > start ? output.Substring(start, end - start) : output.Substring(start);
+                return Version.TryParse(rawVersion.TrimStart('v'), out var installed) && installed >= minimum;
+            }
+            catch
+            {
+                return false;
             }
         }
 
