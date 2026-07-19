@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.7";
+        private const string AppVersion = "1.4.8";
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -90,6 +90,9 @@ namespace Anarise
             Directory.CreateDirectory(binariesPath);
 
             KillOrphanedProcesses();
+            // Remove stale rules left behind by an interrupted previous session.
+            SystemProxyManager.SetBrowserQuicBlocked(false);
+            SystemProxyManager.SetIpv6Blocked(false);
 
             LoadSettings();
             LoadHistory();
@@ -103,6 +106,8 @@ namespace Anarise
                 StopTunnelCore();
                 SystemProxyManager.DisableProxy();
                 SystemProxyManager.SetChromiumQuicAllowed(true);
+                SystemProxyManager.SetBrowserQuicBlocked(false);
+                SystemProxyManager.SetIpv6Blocked(false);
             };
         }
 
@@ -371,6 +376,7 @@ namespace Anarise
                             if (gen != connectionGeneration) return;
                             
                             rawHysteriaConfig["server"] = $"{resolvedIp}:{port}";
+                            rawHysteriaConfig["server_host"] = resolvedIp;
                             if (rawHysteriaConfig["sni"] == null || string.IsNullOrEmpty(rawHysteriaConfig["sni"].ToString()))
                             {
                                 rawHysteriaConfig["sni"] = host;
@@ -626,9 +632,20 @@ namespace Anarise
                 {
                     LogToUi("Настройка системного прокси...");
                     SystemProxyManager.SetProxy(true, $"127.0.0.1:{httpPort}", bypassLan);
-                    SystemProxyManager.SetChromiumQuicAllowed(false);
-                    LogToUi("QUIC/HTTP3 временно отключён для Chrome и Edge. Перезапустите браузер, если он был открыт.");
                 }
+
+                // Apply immediately to already-running browsers and prevent IPv6
+                // from bypassing the IPv4-only proxy/TUN route.
+                SystemProxyManager.SetChromiumQuicAllowed(false);
+                bool quicBlocked = SystemProxyManager.SetBrowserQuicBlocked(true);
+                bool ipv6Blocked = SystemProxyManager.SetIpv6Blocked(true);
+                if (!quicBlocked || !ipv6Blocked)
+                {
+                    SystemProxyManager.SetBrowserQuicBlocked(false);
+                    SystemProxyManager.SetIpv6Blocked(false);
+                    throw new InvalidOperationException("Не удалось применить сетевую защиту QUIC/IPv6 через брандмауэр Windows.");
+                }
+                LogToUi("QUIC/HTTP3 отключён, соединение ограничено IPv4.");
 
                 if (gen != connectionGeneration) return;
 
@@ -650,6 +667,12 @@ namespace Anarise
             }
             catch (Exception ex)
             {
+                StopTun2Socks();
+                StopTunnelCore();
+                SystemProxyManager.DisableProxy();
+                SystemProxyManager.SetChromiumQuicAllowed(true);
+                SystemProxyManager.SetBrowserQuicBlocked(false);
+                SystemProxyManager.SetIpv6Blocked(false);
                 LogToUi("Ошибка запуска подключения: " + ex.Message);
                 if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
             }
@@ -666,6 +689,8 @@ namespace Anarise
             StopTunnelCore();
             SystemProxyManager.DisableProxy();
             SystemProxyManager.SetChromiumQuicAllowed(true);
+            SystemProxyManager.SetBrowserQuicBlocked(false);
+            SystemProxyManager.SetIpv6Blocked(false);
             LogToUi("Соединение разорвано.");
         }
 
@@ -1138,9 +1163,14 @@ namespace Anarise
         {
             if (string.IsNullOrEmpty(hostname)) return hostname;
 
-            // If it's already an IP address, return it immediately
-            if (IPAddress.TryParse(hostname, out _))
+            // IPv6 endpoints are deliberately rejected: this client operates in
+            // IPv4-only mode and must never silently fall back to IPv6.
+            if (IPAddress.TryParse(hostname, out var literalAddress))
             {
+                if (literalAddress.AddressFamily != AddressFamily.InterNetwork)
+                {
+                    throw new InvalidOperationException($"IPv6-адрес {hostname} не поддерживается. Используйте IPv4-конфиг.");
+                }
                 return hostname;
             }
 
@@ -1170,7 +1200,7 @@ namespace Anarise
                                     if (element.TryGetProperty("data", out var dataProp))
                                     {
                                         string ip = dataProp.GetString() ?? "";
-                                        if (IPAddress.TryParse(ip, out _))
+                                        if (IPAddress.TryParse(ip, out var parsedIp) && parsedIp.AddressFamily == AddressFamily.InterNetwork)
                                         {
                                             LogToUi($"Адрес {hostname} разрешён: {ip}");
                                             return ip;
@@ -1211,7 +1241,7 @@ namespace Anarise
                                     if (element.TryGetProperty("data", out var dataProp))
                                     {
                                         string ip = dataProp.GetString() ?? "";
-                                        if (IPAddress.TryParse(ip, out _))
+                                        if (IPAddress.TryParse(ip, out var parsedIp) && parsedIp.AddressFamily == AddressFamily.InterNetwork)
                                         {
                                             LogToUi($"Адрес {hostname} разрешён через Google DoH: {ip}");
                                             return ip;

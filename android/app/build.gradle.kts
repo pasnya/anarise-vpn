@@ -15,8 +15,8 @@ android {
         applicationId = "com.example.vlessvpn"
         minSdk = 24
         targetSdk = 36
-        versionCode = 19
-        versionName = "1.4.7"
+        versionCode = 20
+        versionName = "1.4.8"
         ndk {
             abiFilters.add("arm64-v8a")
         }

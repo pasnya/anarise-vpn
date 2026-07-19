@@ -611,11 +611,25 @@ namespace Anarise
                 ["protocol"] = "freedom",
                 ["settings"] = new JsonObject { ["domainStrategy"] = "AsIs" }
             };
+            var blockOutbound = new JsonObject
+            {
+                ["tag"] = "block",
+                ["protocol"] = "blackhole"
+            };
 
-            config["outbounds"] = new JsonArray(proxyOutbound, directOutbound);
+            config["outbounds"] = new JsonArray(proxyOutbound, directOutbound, blockOutbound);
 
             // Routing
             var rules = new JsonArray();
+            // HTTP/3 cannot be transported by a Windows HTTP proxy reliably.
+            // Reject browser QUIC so clients immediately retry over TCP/TLS.
+            rules.Add(new JsonObject
+            {
+                ["type"] = "field",
+                ["network"] = "udp",
+                ["port"] = "443",
+                ["outboundTag"] = "block"
+            });
             rules.Add(new JsonObject { ["type"] = "field", ["ip"] = new JsonArray("geoip:private"), ["outboundTag"] = "direct" });
 
             if (protocol == "http")

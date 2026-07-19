@@ -1,4 +1,8 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Microsoft.Win32;
 
@@ -20,12 +24,20 @@ namespace Anarise
 
         private const string REG_KEY_PATH = @"Software\Microsoft\Windows\CurrentVersion\Internet Settings";
         private const string QUIC_POLICY_VALUE = "QuicAllowed";
+        private const string QUIC_FIREWALL_GROUP = "Anarise VPN QUIC";
+        private const string IPV6_FIREWALL_GROUP = "Anarise VPN IPv6";
         private static readonly string[] ChromiumPolicyPaths =
         {
             @"Software\Policies\Google\Chrome",
             @"Software\Policies\Microsoft\Edge"
         };
         private static readonly Dictionary<string, RegistryValueSnapshot?> SavedQuicPolicies = new();
+
+        private static readonly HashSet<string> BrowserProcessNames = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "chrome", "msedge", "brave", "vivaldi", "opera", "opera_gx", "firefox",
+            "chromium", "yandex", "browser", "arc"
+        };
 
         public static void SetProxy(bool enabled, string server = "127.0.0.1:20809", bool bypassLan = true)
         {
@@ -139,6 +151,109 @@ namespace Anarise
                 {
                     Console.WriteLine("Failed to update Chromium QUIC policy: " + ex.Message);
                 }
+            }
+        }
+
+        // Chromium policies are not guaranteed to be applied to an already running
+        // browser. Firewall rules make the QUIC fallback immediate and also cover
+        // Firefox and Chromium-based browsers other than Chrome/Edge.
+        public static bool SetBrowserQuicBlocked(bool blocked)
+        {
+            DeleteFirewallGroup(QUIC_FIREWALL_GROUP);
+            if (!blocked) return true;
+
+            int ruleIndex = 0;
+            bool succeeded = false;
+            foreach (var browserPath in FindBrowserExecutables())
+            {
+                succeeded |= RunNetsh($"advfirewall firewall add rule name=\"Anarise VPN QUIC {++ruleIndex}\" group=\"{QUIC_FIREWALL_GROUP}\" dir=out action=block protocol=UDP remoteport=443 program=\"{browserPath}\" enable=yes profile=any");
+            }
+            return succeeded;
+        }
+
+        // The tunnel is intentionally IPv4-only. Blocking IPv6 while connected
+        // prevents Windows from bypassing the IPv4 TUN/default-proxy path.
+        public static bool SetIpv6Blocked(bool blocked)
+        {
+            DeleteFirewallGroup(IPV6_FIREWALL_GROUP);
+            if (!blocked) return true;
+
+            return RunNetsh($"advfirewall firewall add rule name=\"Anarise VPN - Block IPv6\" group=\"{IPV6_FIREWALL_GROUP}\" dir=out action=block remoteip=::/0 enable=yes profile=any");
+        }
+
+        private static IEnumerable<string> FindBrowserExecutables()
+        {
+            var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            string programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+
+            string[] candidates =
+            {
+                Path.Combine(programFiles, "Google", "Chrome", "Application", "chrome.exe"),
+                Path.Combine(programFilesX86, "Google", "Chrome", "Application", "chrome.exe"),
+                Path.Combine(localAppData, "Google", "Chrome", "Application", "chrome.exe"),
+                Path.Combine(programFiles, "Microsoft", "Edge", "Application", "msedge.exe"),
+                Path.Combine(programFilesX86, "Microsoft", "Edge", "Application", "msedge.exe"),
+                Path.Combine(programFiles, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+                Path.Combine(programFilesX86, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+                Path.Combine(localAppData, "BraveSoftware", "Brave-Browser", "Application", "brave.exe"),
+                Path.Combine(programFiles, "Vivaldi", "Application", "vivaldi.exe"),
+                Path.Combine(localAppData, "Vivaldi", "Application", "vivaldi.exe"),
+                Path.Combine(programFiles, "Mozilla Firefox", "firefox.exe"),
+                Path.Combine(programFilesX86, "Mozilla Firefox", "firefox.exe"),
+                Path.Combine(localAppData, "Programs", "Opera", "opera.exe"),
+                Path.Combine(localAppData, "Programs", "Opera GX", "opera.exe"),
+                Path.Combine(localAppData, "Yandex", "YandexBrowser", "Application", "browser.exe")
+            };
+
+            foreach (var path in candidates.Where(File.Exists)) paths.Add(path);
+
+            foreach (var process in Process.GetProcesses())
+            {
+                try
+                {
+                    if (!BrowserProcessNames.Contains(process.ProcessName)) continue;
+                    var path = process.MainModule?.FileName;
+                    if (!string.IsNullOrEmpty(path) && File.Exists(path)) paths.Add(path);
+                }
+                catch { }
+                finally { process.Dispose(); }
+            }
+
+            return paths;
+        }
+
+        private static void DeleteFirewallGroup(string group)
+        {
+            RunNetsh($"advfirewall firewall delete rule name=all group=\"{group}\"");
+        }
+
+        private static bool RunNetsh(string arguments)
+        {
+            try
+            {
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = "netsh",
+                    Arguments = arguments,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true
+                });
+                if (process == null) return false;
+                if (!process.WaitForExit(5000))
+                {
+                    try { process.Kill(true); } catch { }
+                    return false;
+                }
+                return process.ExitCode == 0;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Failed to update VPN firewall rules: " + ex.Message);
+                return false;
             }
         }
 
