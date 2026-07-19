@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.11";
+        private const string AppVersion = "1.4.12";
         private const string RequiredXrayVersion = "26.7.11";
         private const string RequiredXrayDownloadUrl = "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-windows-64.zip";
         private Task binariesSetupTask = Task.CompletedTask;
@@ -459,13 +459,20 @@ namespace Anarise
 
                         if (useNativeXrayTun)
                         {
-                            AddNativeXrayTun(xrayConfig);
+                            string? outboundInterface = FindPhysicalOutboundInterface();
+                            if (string.IsNullOrWhiteSpace(outboundInterface))
+                            {
+                                throw new InvalidOperationException("Не найден активный IPv4-интерфейс с физическим шлюзом.");
+                            }
+
+                            LogToUi($"Физический интерфейс VPN: {outboundInterface}");
+                            AddNativeXrayTun(xrayConfig, outboundInterface);
                         }
                         parsedConfig = xrayConfig.ToJsonString();
                     }
                     catch (Exception ex)
                     {
-                        LogToUi("Ошибка разрешения DNS для Xray: " + ex.Message);
+                        LogToUi("Ошибка подготовки конфигурации Xray: " + ex.Message);
                         if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
                         return;
                     }
@@ -759,7 +766,66 @@ namespace Anarise
         }
 
         // --- TUN2SOCKS VPN TUNNEL ---
-        private static void AddNativeXrayTun(JsonObject xrayConfig)
+        private static string? FindPhysicalOutboundInterface()
+        {
+            var candidates = new List<(string Name, int Priority, long Speed)>();
+
+            foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                try
+                {
+                    if (networkInterface.OperationalStatus != OperationalStatus.Up ||
+                        networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback ||
+                        networkInterface.NetworkInterfaceType == NetworkInterfaceType.Tunnel)
+                    {
+                        continue;
+                    }
+
+                    var properties = networkInterface.GetIPProperties();
+                    bool hasIpv4Gateway = properties.GatewayAddresses.Any(gateway =>
+                        gateway.Address.AddressFamily == AddressFamily.InterNetwork &&
+                        !gateway.Address.Equals(IPAddress.Any) &&
+                        !gateway.Address.Equals(IPAddress.None));
+                    bool hasUsableIpv4 = properties.UnicastAddresses.Any(address =>
+                        address.Address.AddressFamily == AddressFamily.InterNetwork &&
+                        !IPAddress.IsLoopback(address.Address) &&
+                        !address.Address.ToString().StartsWith("169.254.", StringComparison.Ordinal));
+
+                    if (!hasIpv4Gateway || !hasUsableIpv4)
+                    {
+                        continue;
+                    }
+
+                    // A real default gateway is the important discriminator:
+                    // host-only, TUN, Tailscale and similar virtual adapters do
+                    // not have one. Prefer wired/PPP when several uplinks exist.
+                    int priority = networkInterface.NetworkInterfaceType switch
+                    {
+                        NetworkInterfaceType.Ppp => 3,
+                        NetworkInterfaceType.Ethernet => 2,
+                        NetworkInterfaceType.GigabitEthernet => 2,
+                        NetworkInterfaceType.FastEthernetFx => 2,
+                        NetworkInterfaceType.FastEthernetT => 2,
+                        NetworkInterfaceType.Wireless80211 => 1,
+                        _ => 0
+                    };
+                    candidates.Add((networkInterface.Name, priority, networkInterface.Speed));
+                }
+                catch
+                {
+                    // Ignore adapters that disappear while Windows enumerates
+                    // network state and continue with the remaining candidates.
+                }
+            }
+
+            return candidates
+                .OrderByDescending(candidate => candidate.Priority)
+                .ThenByDescending(candidate => candidate.Speed)
+                .Select(candidate => candidate.Name)
+                .FirstOrDefault();
+        }
+
+        private static void AddNativeXrayTun(JsonObject xrayConfig, string outboundInterface)
         {
             var inbounds = xrayConfig["inbounds"]?.AsArray();
             if (inbounds == null)
@@ -769,7 +835,9 @@ namespace Anarise
             }
 
             // Xray configures the adapter atomically and binds every outbound
-            // socket to the real interface before installing the default route.
+            // socket to the explicitly selected physical interface before
+            // installing the default route. Its "auto" selector can prefer an
+            // active host-only adapter on Windows and reset every connection.
             // Only IPv4 is advertised. Public resolvers are reached through the
             // tunnel, so Windows never falls back to the LAN/router DNS.
             inbounds.Insert(0, new JsonObject
@@ -783,7 +851,7 @@ namespace Anarise
                     ["gateway"] = new JsonArray("10.0.85.1/24"),
                     ["dns"] = new JsonArray("1.1.1.1", "8.8.8.8"),
                     ["autoSystemRoutingTable"] = new JsonArray("0.0.0.0/0"),
-                    ["autoOutboundsInterface"] = "auto"
+                    ["autoOutboundsInterface"] = outboundInterface
                 }
             });
         }
