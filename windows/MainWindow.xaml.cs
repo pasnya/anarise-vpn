@@ -1709,8 +1709,7 @@ namespace Anarise
                                 .Where(link => link.StartsWith("vless://") || link.StartsWith("naive+https://") || link.StartsWith("hysteria2://") || link.StartsWith("hy2://") || link.StartsWith("mieru://") || link.StartsWith("mierus://"))
                                 .ToList();
 
-                            // Take the last 20 configs from this source to be efficient
-                            return parsed.Skip(Math.Max(0, parsed.Count - 20)).ToList();
+                            return parsed;
                         }
                         catch
                         {
@@ -1769,7 +1768,6 @@ namespace Anarise
                     var tcpCandidates = workingConfigs.Cast<dynamic>()
                         .Select(c => ((string)c.link, (long)c.latency))
                         .OrderBy(c => c.Item2)
-                        .Take(30)
                         .ToList();
                     var verifiedConfigs = new List<(string Link, long Latency)>();
                     int verified = 0;
@@ -1796,7 +1794,7 @@ namespace Anarise
                         await Task.WhenAll(verificationTasks);
                     }
                     var sortedConfigs = verifiedConfigs.OrderBy(c => c.Latency)
-                        .Take(10).Select(c => new { link = c.Link, latency = c.Latency }).ToList();
+                        .Select(c => new { link = c.Link, latency = c.Latency }).ToList();
 
                     if (sortedConfigs.Count > 0)
                     {
@@ -1808,7 +1806,7 @@ namespace Anarise
                     }
 
                     PostToUi(new { action = "updateExternalConfigs", configs = sortedConfigs });
-                    PostToUi(new { action = "updateExternalStatus", statusText = sortedConfigs.Count > 0 ? $"Найдено рабочих: {sortedConfigs.Count} (топ-10)" : "Нет рабочих серверов" });
+                    PostToUi(new { action = "updateExternalStatus", statusText = sortedConfigs.Count > 0 ? $"Найдено рабочих: {sortedConfigs.Count}" : "Нет рабочих серверов" });
                 }
                 catch (Exception ex)
                 {
