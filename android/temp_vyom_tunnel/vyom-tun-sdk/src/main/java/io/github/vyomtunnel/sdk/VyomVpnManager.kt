@@ -14,6 +14,7 @@ import android.widget.Toast
 import io.github.vyomtunnel.core.NativeEngine
 import io.github.vyomtunnel.sdk.models.VyomIpInfo
 import io.github.vyomtunnel.sdk.utils.AssetUtils
+import io.github.vyomtunnel.sdk.utils.HysteriaEngine
 import io.github.vyomtunnel.sdk.utils.LinkParser
 import io.github.vyomtunnel.sdk.utils.VyomLogger
 
@@ -43,6 +44,8 @@ object VyomVpnManager {
     private val excludedApps = mutableSetOf<String>()
     private const val KEY_KILL_SWITCH = "kill_switch_enabled"
     const val ACTION_NO_INTERNET = "io.github.vyomtunnel.NO_INTERNET"
+    private const val LOCAL_SOCKS_PORT = 20808
+    private val configVerificationLock = Any()
 
     var currentState: VyomState = VyomState.IDLE
         private set
@@ -204,6 +207,74 @@ object VyomVpnManager {
         }
         val assetPath = context.filesDir.absolutePath
         return NativeEngine.validateConfig(config, assetPath)
+    }
+
+    /**
+     * Verifies that a link can carry real HTTPS traffic, not merely accept a TCP
+     * connection. The core uses a fixed local SOCKS port, so this is intentionally
+     * serialized and must never run while the user's VPN session is active.
+     */
+    fun verifyConfigTraffic(context: Context, link: String): Boolean = synchronized(configVerificationLock) {
+        if (currentState == VyomState.CONNECTED || currentState == VyomState.CONNECTING ||
+            currentState == VyomState.STOPPING) {
+            return@synchronized false
+        }
+
+        try {
+            val config = LinkParser.parse(link)
+            val isHysteria2 = LinkParser.isHysteria2Config(config)
+
+            NativeEngine.stopXray()
+            HysteriaEngine.stop()
+
+            if (isHysteria2) {
+                val params = org.json.JSONObject(config)
+                HysteriaEngine.start(
+                    context = context,
+                    server = params.getString("server"),
+                    auth = params.getString("auth"),
+                    sni = params.optString("sni"),
+                    insecure = params.optBoolean("insecure", false),
+                    obfsType = params.optString("obfs_type"),
+                    obfsPassword = params.optString("obfs_password"),
+                    alpn = params.optString("alpn")
+                )
+                Thread.sleep(1200)
+            } else {
+                NativeEngine.startXray(config, context.filesDir.absolutePath)
+                Thread.sleep(800)
+            }
+
+            val proxy = java.net.Proxy(
+                java.net.Proxy.Type.SOCKS,
+                java.net.InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT)
+            )
+            val endpoints = listOf(
+                "https://www.gstatic.com/generate_204",
+                "https://cp.cloudflare.com/generate_204"
+            )
+            endpoints.any { endpoint ->
+                try {
+                    val connection = java.net.URL(endpoint).openConnection(proxy) as java.net.HttpURLConnection
+                    connection.connectTimeout = 5000
+                    connection.readTimeout = 5000
+                    connection.instanceFollowRedirects = false
+                    try {
+                        connection.responseCode in 200..299
+                    } finally {
+                        connection.disconnect()
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Traffic verification failed", e)
+            false
+        } finally {
+            NativeEngine.stopXray()
+            HysteriaEngine.stop()
+        }
     }
 
     // --- LISTENERS & IPC (Inter-Process Communication) ---

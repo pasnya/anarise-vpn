@@ -8,6 +8,13 @@ using Microsoft.Win32;
 
 namespace Anarise
 {
+    public sealed class ProxySettingsSnapshot
+    {
+        public int? ProxyEnable { get; set; }
+        public string? ProxyServer { get; set; }
+        public string? ProxyOverride { get; set; }
+    }
+
     public static class SystemProxyManager
     {
         private sealed class RegistryValueSnapshot
@@ -39,11 +46,42 @@ namespace Anarise
             "chromium", "yandex", "browser", "arc"
         };
 
-        public static void SetProxy(bool enabled, string server = "127.0.0.1:20809", bool bypassLan = true)
+        public static ProxySettingsSnapshot CaptureSettings()
+        {
+            using RegistryKey? key = Registry.CurrentUser.OpenSubKey(REG_KEY_PATH, false);
+            return new ProxySettingsSnapshot
+            {
+                ProxyEnable = key?.GetValue("ProxyEnable") as int?,
+                ProxyServer = key?.GetValue("ProxyServer") as string,
+                ProxyOverride = key?.GetValue("ProxyOverride") as string
+            };
+        }
+
+        public static bool RestoreSettings(ProxySettingsSnapshot snapshot)
         {
             try
             {
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(REG_KEY_PATH, true))
+                using RegistryKey? key = Registry.CurrentUser.OpenSubKey(REG_KEY_PATH, true);
+                if (key == null) return false;
+
+                RestoreValue(key, "ProxyEnable", snapshot.ProxyEnable, RegistryValueKind.DWord);
+                RestoreValue(key, "ProxyServer", snapshot.ProxyServer, RegistryValueKind.String);
+                RestoreValue(key, "ProxyOverride", snapshot.ProxyOverride, RegistryValueKind.String);
+                NotifySystem();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine("Failed to restore system proxy settings: " + ex.Message);
+                return false;
+            }
+        }
+
+        public static bool SetProxy(bool enabled, string server = "127.0.0.1:20809", bool bypassLan = true)
+        {
+            try
+            {
+                using (RegistryKey? key = Registry.CurrentUser.OpenSubKey(REG_KEY_PATH, true))
                 {
                     if (key != null)
                     {
@@ -74,7 +112,7 @@ namespace Anarise
                 // Delete connection setting caches to force Windows to regenerate DefaultConnectionSettings
                 try
                 {
-                    using (RegistryKey connKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections", true))
+                    using (RegistryKey? connKey = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\Internet Settings\Connections", true))
                     {
                         if (connKey != null)
                         {
@@ -90,16 +128,26 @@ namespace Anarise
 
                 // Notify IE / Windows that settings have changed
                 NotifySystem();
+                return true;
             }
             catch (Exception ex)
             {
                 Console.WriteLine("Failed to update system proxy registry settings: " + ex.Message);
+                return false;
             }
         }
 
-        public static void DisableProxy()
+        public static bool DisableProxy()
         {
-            SetProxy(false);
+            return SetProxy(false);
+        }
+
+        private static void RestoreValue(RegistryKey key, string name, object? value, RegistryValueKind kind)
+        {
+            if (value == null)
+                key.DeleteValue(name, false);
+            else
+                key.SetValue(name, value, kind);
         }
 
         // HTTP system proxies do not tunnel QUIC/HTTP3 UDP traffic. Disable QUIC

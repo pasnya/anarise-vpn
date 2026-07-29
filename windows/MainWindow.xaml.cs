@@ -44,7 +44,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.12";
+        private const string AppVersion = "1.4.13";
         private const string RequiredXrayVersion = "26.7.11";
         private const string RequiredXrayDownloadUrl = "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-windows-64.zip";
         private Task binariesSetupTask = Task.CompletedTask;
@@ -1585,6 +1585,82 @@ namespace Anarise
             await Task.WhenAll(tasks);
         }
 
+        private static int GetAvailableTcpPort()
+        {
+            var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            return port;
+        }
+
+        // A TCP handshake alone accepts many expired or incorrectly configured
+        // public profiles. Start an isolated core and require real proxy traffic.
+        private async Task<bool> VerifyProxyTrafficAsync(string link)
+        {
+            string configPath = Path.Combine(appDataPath, $"validation-{Guid.NewGuid():N}.json");
+            Process? process = null;
+            try
+            {
+                int socksTestPort = GetAvailableTcpPort();
+                int httpTestPort = GetAvailableTcpPort();
+                string protocolConfig = LinkParser.Parse(link, socksTestPort, httpTestPort);
+                bool isHysteria = LinkParser.IsHysteria2Config(protocolConfig);
+                string executablePath = Path.Combine(binariesPath, isHysteria ? "hysteria.exe" : "xray.exe");
+                if (!File.Exists(executablePath)) return false;
+
+                if (isHysteria)
+                {
+                    var source = JsonNode.Parse(protocolConfig)?.AsObject();
+                    if (source == null) return false;
+                    var config = new JsonObject
+                    {
+                        ["server"] = source["server"]?.ToString(),
+                        ["auth"] = source["auth"]?.ToString(),
+                        ["socks5"] = new JsonObject { ["listen"] = $"127.0.0.1:{socksTestPort}" },
+                        ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpTestPort}" },
+                        ["logger"] = new JsonObject { ["level"] = "error" }
+                    };
+                    if (source["sni"] != null)
+                        config["tls"] = new JsonObject { ["sni"] = source["sni"]?.ToString(), ["insecure"] = source["insecure"]?.AsValue().GetValue<bool>() ?? false };
+                    if (source["obfs_type"]?.ToString() == "salamander")
+                        config["obfs"] = new JsonObject { ["type"] = "salamander", ["salamander"] = new JsonObject { ["password"] = source["obfs_password"]?.ToString() ?? "" } };
+                    await File.WriteAllTextAsync(configPath, config.ToJsonString());
+                }
+                else
+                {
+                    await File.WriteAllTextAsync(configPath, protocolConfig);
+                }
+
+                process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = executablePath,
+                    Arguments = isHysteria ? $"-c \"{configPath}\" client" : $"-c \"{configPath}\"",
+                    WorkingDirectory = binariesPath,
+                    CreateNoWindow = true,
+                    UseShellExecute = false,
+                    RedirectStandardError = true,
+                    RedirectStandardOutput = true
+                });
+                if (process == null) return false;
+
+                await Task.Delay(900);
+                if (process.HasExited) return false;
+
+                using var handler = new HttpClientHandler { Proxy = new WebProxy($"http://127.0.0.1:{httpTestPort}"), UseProxy = true };
+                using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+                using var response = await client.GetAsync("https://www.gstatic.com/generate_204");
+                return response.IsSuccessStatusCode;
+            }
+            catch { return false; }
+            finally
+            {
+                try { if (process != null && !process.HasExited) process.Kill(true); } catch { }
+                process?.Dispose();
+                try { if (File.Exists(configPath)) File.Delete(configPath); } catch { }
+            }
+        }
+
         // --- EXTERNAL CONFIGS FETCH ---
         private async Task RefreshExternalConfigsAsync()
         {
@@ -1690,11 +1766,37 @@ namespace Anarise
                         await Task.WhenAll(pingTasks);
                     }
 
-                    // Sort working configs by lowest latency and take top 10 (matching Android's limit of 10)
-                    var sortedConfigs = workingConfigs.Cast<dynamic>()
-                        .OrderBy(c => c.latency)
-                        .Take(10)
+                    var tcpCandidates = workingConfigs.Cast<dynamic>()
+                        .Select(c => ((string)c.link, (long)c.latency))
+                        .OrderBy(c => c.Item2)
+                        .Take(30)
                         .ToList();
+                    var verifiedConfigs = new List<(string Link, long Latency)>();
+                    int verified = 0;
+                    PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка прокси-трафика (0/{tcpCandidates.Count})..." });
+                    using (var verificationSemaphore = new System.Threading.SemaphoreSlim(3))
+                    {
+                        var verificationTasks = tcpCandidates.Select(async candidate =>
+                        {
+                            await verificationSemaphore.WaitAsync();
+                            try
+                            {
+                                if (await VerifyProxyTrafficAsync(candidate.Item1))
+                                {
+                                    lock (verifiedConfigs) verifiedConfigs.Add((candidate.Item1, candidate.Item2));
+                                }
+                            }
+                            finally
+                            {
+                                int current = System.Threading.Interlocked.Increment(ref verified);
+                                PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка прокси-трафика ({current}/{tcpCandidates.Count})..." });
+                                verificationSemaphore.Release();
+                            }
+                        }).ToArray();
+                        await Task.WhenAll(verificationTasks);
+                    }
+                    var sortedConfigs = verifiedConfigs.OrderBy(c => c.Latency)
+                        .Take(10).Select(c => new { link = c.Link, latency = c.Latency }).ToList();
 
                     if (sortedConfigs.Count > 0)
                     {

@@ -532,7 +532,29 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     jobs.awaitAll()
                 }
                 
-                val working = checkedConfigs.sortedBy { it.second }.take(10)
+                // A reachable port does not mean that the proxy credentials or
+                // transport work. Verify actual HTTPS traffic through the core.
+                val tcpCandidates = checkedConfigs.sortedBy { it.second }.take(30)
+                _externalStatusText.value = "Проверка прокси-трафика (0/${tcpCandidates.size})..."
+
+                val verifiedConfigs = mutableListOf<Pair<String, Long>>()
+                val verifiedCount = java.util.concurrent.atomic.AtomicInteger(0)
+                coroutineScope {
+                    tcpCandidates.map { candidate ->
+                        async(Dispatchers.IO) {
+                            val isWorking = VyomVpnManager.verifyConfigTraffic(getApplication(), candidate.first)
+                            if (isWorking) {
+                                synchronized(verifiedConfigs) {
+                                    verifiedConfigs.add(candidate)
+                                }
+                            }
+                            val count = verifiedCount.incrementAndGet()
+                            _externalStatusText.value = "Проверка прокси-трафика ($count/${tcpCandidates.size})..."
+                        }
+                    }.awaitAll()
+                }
+
+                val working = verifiedConfigs.sortedBy { it.second }.take(10)
                 _externalConfigs.value = working
                 _externalStatusText.value = if (working.isEmpty()) "Нет рабочих серверов" else "Найдено рабочих: ${working.size} (топ-10)"
             } catch (e: Exception) {

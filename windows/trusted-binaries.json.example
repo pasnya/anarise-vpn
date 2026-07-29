@@ -1,0 +1,20 @@
+{
+  "artifacts": {
+    "xray": {
+      "url": "https://github.com/XTLS/Xray-core/releases/download/<version>/Xray-windows-64.zip",
+      "sha256": "<64-character SHA-256 of the exact archive>"
+    },
+    "hysteria": {
+      "url": "https://github.com/apernet/hysteria/releases/download/<version>/hysteria-windows-amd64.exe",
+      "sha256": "<64-character SHA-256 of the exact executable>"
+    },
+    "tun2socks": {
+      "url": "https://github.com/xjasonlyu/tun2socks/releases/download/<version>/tun2socks-windows-amd64.zip",
+      "sha256": "<64-character SHA-256 of the exact archive>"
+    },
+    "wintun": {
+      "url": "https://www.wintun.net/builds/wintun-<version>.zip",
+      "sha256": "<64-character SHA-256 of the exact archive>"
+    }
+  }
+}
