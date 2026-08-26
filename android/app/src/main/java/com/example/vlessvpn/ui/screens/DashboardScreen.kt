@@ -3,6 +3,7 @@ package com.example.vlessvpn.ui.screens
 import android.app.Activity
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,6 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -35,6 +37,8 @@ import com.example.vlessvpn.utils.FormatterUtils.getDisplayLabel
 import com.google.mlkit.vision.codescanner.GmsBarcodeScanning
 import io.github.vyomtunnel.sdk.VyomState
 import io.github.vyomtunnel.sdk.VyomVpnManager
+
+private fun String.containsAny(vararg values: String): Boolean = values.any { contains(it) }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -67,14 +71,29 @@ fun DashboardScreen(
     val activity = context as? Activity
 
     val isConnected = state == VyomState.CONNECTED
-
     var selectedTab by remember { mutableStateOf(0) }
+    var serverSearch by remember { mutableStateOf("") }
+    var serverRegion by remember { mutableStateOf("all") }
+    val filteredHistory = remember(historyList, serverSearch, serverRegion) {
+        historyList.filter { link ->
+            val value = "${getDisplayLabel(link)} $link".lowercase()
+            val searchMatches = serverSearch.isBlank() || value.contains(serverSearch.lowercase())
+            val regionMatches = when (serverRegion) {
+                "europe" -> !value.containsAny("tokyo", "singapore", "seoul", "japan", "asia", "india", "hong kong", "new york", "los angeles", "chicago", "usa", "canada")
+                "asia" -> value.containsAny("tokyo", "singapore", "seoul", "japan", "asia", "india", "hong kong")
+                "america" -> value.containsAny("new york", "los angeles", "chicago", "usa", "canada", "america", "miami")
+                else -> true
+            }
+            searchMatches && regionMatches
+        }
+    }
+
     var showImportDialog by remember { mutableStateOf(false) }
     var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
     val currentVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.4.14"
+            pInfo.versionName ?: "1.4.15"
         } catch (e: Exception) {
             "1.1.0"
         }
@@ -212,6 +231,28 @@ fun DashboardScreen(
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(28.dp)
                     )
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(12.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                shape = RoundedCornerShape(18.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+            ) {
+                Box(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("•  GLOBAL NETWORK", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Выберите защищённый узел", color = MaterialTheme.colorScheme.onBackground, fontSize = 23.sp, fontWeight = FontWeight.Bold)
+                        Text("Найдите оптимальный сервер и инициируйте защищённый туннель.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    }
+                    Column(modifier = Modifier.align(Alignment.TopEnd), horizontalAlignment = Alignment.End) {
+                        Text(historyList.size.toString(), color = MaterialTheme.colorScheme.primary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Text("узлов", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                    }
                 }
             }
         }
@@ -477,6 +518,27 @@ fun DashboardScreen(
 
         if (selectedTab == 0) {
             item {
+                OutlinedTextField(
+                    value = serverSearch,
+                    onValueChange = { serverSearch = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                    placeholder = { Text("Поиск по городам и странам...", fontSize = 12.sp) },
+                    shape = RoundedCornerShape(12.dp)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf("all" to "Все", "europe" to "Европа", "asia" to "Азия", "america" to "Америка").forEach { (region, label) ->
+                        FilterChip(
+                            selected = serverRegion == region,
+                            onClick = { serverRegion = region },
+                            label = { Text(label, fontSize = 11.sp) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -513,7 +575,7 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            if (historyList.isEmpty()) {
+            if (filteredHistory.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -522,14 +584,14 @@ fun DashboardScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Список серверов пуст",
+                            text = if (historyList.isEmpty()) "Список серверов пуст" else "По фильтру серверы не найдены",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 14.sp
                         )
                     }
                 }
             } else {
-                items(historyList) { item ->
+                items(filteredHistory) { item ->
                     val ping = pingResults[item]
                     val pingLoad = pingLoading[item] == true
                     ServerCard(

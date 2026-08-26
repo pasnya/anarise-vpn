@@ -7,11 +7,11 @@
         xmlns:local="clr-namespace:Anarise"
         mc:Ignorable="d"
         Title="ANARISE VPN" 
-        Height="780" 
-        Width="460" 
-        MinWidth="420"
+        Height="760"
+        Width="980"
+        MinWidth="820"
         MinHeight="650"
-        Background="#121212"
+        Background="#070B16"
         WindowStartupLocation="CenterScreen">
     <Grid>
         <!-- WebView2 Control filling the window -->

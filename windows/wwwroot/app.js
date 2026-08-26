@@ -26,7 +26,9 @@ let appState = {
         totalDownload: 0,
         duration: 0
     },
-    exitIp: null // { ip, country, countryCode, city }
+    exitIp: null, // { ip, country, countryCode, city }
+    serverSearch: '',
+    serverRegion: 'all'
 };
 
 // --- WEBVIEW2 COMMUNICATION BRIDGE ---
@@ -121,6 +123,30 @@ document.addEventListener('DOMContentLoaded', () => {
     // Navigations
     document.getElementById('btn-settings').addEventListener('click', () => switchScreen('settings'));
     document.getElementById('btn-settings-back').addEventListener('click', () => switchScreen('main'));
+    document.getElementById('btn-sidebar-settings').addEventListener('click', () => switchScreen('settings'));
+
+    document.querySelectorAll('[data-nav-tab]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabId = btn.dataset.navTab;
+            const tabButton = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+            if (tabButton) switchTab(tabButton, tabId);
+            document.querySelectorAll('.sidebar-nav-item').forEach(item => item.classList.remove('active'));
+            btn.classList.add('active');
+        });
+    });
+
+    document.getElementById('server-search-input').addEventListener('input', (e) => {
+        appState.serverSearch = e.target.value.trim().toLowerCase();
+        renderServersList();
+    });
+    document.querySelectorAll('.region-filter').forEach(btn => {
+        btn.addEventListener('click', () => {
+            appState.serverRegion = btn.dataset.region;
+            document.querySelectorAll('.region-filter').forEach(item => item.classList.remove('active'));
+            btn.classList.add('active');
+            renderServersList();
+        });
+    });
 
     // Action buttons
     document.getElementById('btn-paste').addEventListener('click', () => sendToHost('pasteFromClipboard'));
@@ -294,6 +320,9 @@ function updateVpnState(state) {
     const btn = document.getElementById('btn-connect');
 
     label.className = 'status-text ' + state.toLowerCase();
+    const sidebarTitle = document.getElementById('sidebar-status-title');
+    const sidebarSubtitle = document.getElementById('sidebar-status-subtitle');
+    const sidebarDot = document.querySelector('.sidebar-status-dot');
     
     switch (state) {
         case 'DISCONNECTED':
@@ -301,23 +330,35 @@ function updateVpnState(state) {
             btn.innerText = 'Подключиться';
             btn.className = 'connect-btn';
             hideStatsContainerDetails();
+            sidebarTitle.innerText = 'Shield inactive';
+            sidebarSubtitle.innerText = 'Not protected';
+            sidebarDot.className = 'sidebar-status-dot';
             break;
         case 'CONNECTING':
             label.innerText = 'Подключение...';
             btn.innerText = 'Прервать';
             btn.className = 'connect-btn';
+            sidebarTitle.innerText = 'Connecting';
+            sidebarSubtitle.innerText = 'Negotiating tunnel';
+            sidebarDot.className = 'sidebar-status-dot connecting';
             break;
         case 'CONNECTED':
             label.innerText = 'Подключено';
             btn.innerText = 'Отключиться';
             btn.className = 'connect-btn connected';
             showStatsContainerDetails();
+            sidebarTitle.innerText = 'Shield active';
+            sidebarSubtitle.innerText = 'Connection protected';
+            sidebarDot.className = 'sidebar-status-dot connected';
             break;
         case 'ERROR':
             label.innerText = 'Ошибка';
             btn.innerText = 'Подключиться';
             btn.className = 'connect-btn';
             hideStatsContainerDetails();
+            sidebarTitle.innerText = 'Connection error';
+            sidebarSubtitle.innerText = 'Check diagnostics';
+            sidebarDot.className = 'sidebar-status-dot error';
             break;
     }
 }
@@ -421,7 +462,15 @@ function renderServersList() {
         return;
     }
 
-    appState.configHistory.forEach(link => {
+    const filtered = appState.configHistory.filter(link => matchesServerFilter(link));
+    document.getElementById('server-count').innerText = filtered.length;
+
+    if (filtered.length === 0) {
+        list.innerHTML = '<div class="empty-state">По выбранному фильтру серверы не найдены</div>';
+        return;
+    }
+
+    filtered.forEach(link => {
         const isSelected = (link.trim() === appState.selectedConfig.trim());
         const ping = appState.pingResults[link];
         const loading = appState.pingLoading[link] === true;
@@ -429,6 +478,21 @@ function renderServersList() {
         const card = createServerCard(link, isSelected, ping, loading, true);
         list.appendChild(card);
     });
+}
+
+function matchesServerFilter(link) {
+    const haystack = `${getDisplayLabel(link)} ${getProtocolHost(link)} ${link}`.toLowerCase();
+    if (appState.serverSearch && !haystack.includes(appState.serverSearch)) return false;
+    if (appState.serverRegion === 'all') return true;
+    const region = getRegionForServer(link);
+    return region === appState.serverRegion;
+}
+
+function getRegionForServer(link) {
+    const value = `${getDisplayLabel(link)} ${getProtocolHost(link)}`.toLowerCase();
+    if (/tokyo|singapore|seoul|japan|asia|hong kong|india/.test(value)) return 'asia';
+    if (/new york|los angeles|chicago|canada|america|us |usa|miami/.test(value)) return 'america';
+    return 'europe';
 }
 
 function renderExternalConfigs() {

@@ -45,8 +45,12 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.14";
+        private const string AppVersion = "1.4.15";
         private const string RequiredXrayVersion = "26.7.11";
+        // Binary downloads can be several dozen megabytes and may be throttled by
+        // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
+        // is too short for a first-time installation.
+        private static readonly TimeSpan BinaryDownloadTimeout = TimeSpan.FromMinutes(15);
         private Task binariesSetupTask = Task.CompletedTask;
         private NetworkStateGuard networkStateGuard;
         private CancellationTokenSource reconnectCts;
@@ -2158,8 +2162,16 @@ namespace Anarise
 
         private async Task DownloadFileWithProgress(string url, string destination, int startPercentage, int endPercentage)
         {
-            using (var client = new HttpClient())
+            using var handler = new HttpClientHandler
             {
+                AutomaticDecompression = DecompressionMethods.All
+            };
+            using (var client = new HttpClient(handler)
+            {
+                Timeout = BinaryDownloadTimeout
+            })
+            {
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("ANARISE-VPN-WindowsClient/1.4");
                 using (var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead))
                 {
                     response.EnsureSuccessStatusCode();

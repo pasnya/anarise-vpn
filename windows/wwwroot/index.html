@@ -12,6 +12,37 @@
         
         <!-- MAIN DASHBOARD SCREEN -->
         <div id="screen-main" class="screen active">
+            <aside class="variant-sidebar" aria-label="Навигация">
+                <div class="sidebar-brand">
+                    <img src="logo.png" alt="" class="sidebar-logo">
+                    <div>
+                        <div class="sidebar-product">ANARISE</div>
+                        <div class="sidebar-caption">NETWORK CONTROL</div>
+                    </div>
+                </div>
+                <div class="sidebar-status">
+                    <span class="sidebar-status-dot"></span>
+                    <div>
+                        <strong id="sidebar-status-title">Shield inactive</strong>
+                        <span id="sidebar-status-subtitle">Not protected</span>
+                    </div>
+                </div>
+                <nav class="sidebar-nav">
+                    <button class="sidebar-nav-item active" type="button" data-nav-tab="tab-servers">
+                        <span class="nav-glyph">⌘</span><span>Dashboard</span>
+                    </button>
+                    <button class="sidebar-nav-item" type="button" data-nav-tab="tab-servers">
+                        <span class="nav-glyph">◈</span><span>Servers</span>
+                    </button>
+                    <button class="sidebar-nav-item" type="button" data-nav-tab="tab-logs">
+                        <span class="nav-glyph">⌁</span><span>Diagnostics</span>
+                    </button>
+                    <button class="sidebar-nav-item" type="button" id="btn-sidebar-settings">
+                        <span class="nav-glyph">⚙</span><span>Settings</span>
+                    </button>
+                </nav>
+                <div class="sidebar-footer">v1.4.15 · secure tunnel</div>
+            </aside>
             <!-- Header -->
             <header class="header">
                 <div class="logo-area">
@@ -24,6 +55,16 @@
                     </svg>
                 </button>
             </header>
+
+            <section class="network-hero" aria-label="Глобальная сеть">
+                <div class="network-grid"></div>
+                <div class="network-hero-content">
+                    <div class="eyebrow"><span class="live-dot"></span> GLOBAL NETWORK</div>
+                    <h2>Выберите защищённый узел</h2>
+                    <p>Найдите оптимальный сервер и инициируйте защищённый туннель.</p>
+                </div>
+                <div class="network-metrics"><span id="server-count">0</span><small>узлов в списке</small></div>
+            </section>
 
             <!-- Status Indicator -->
             <div class="status-container">
@@ -107,8 +148,20 @@
             <div class="tab-content-container">
                 <!-- Servers List Tab -->
                 <div id="tab-servers" class="tab-pane active">
+                    <div class="explorer-toolbar">
+                        <div class="server-search">
+                            <span>⌕</span>
+                            <input id="server-search-input" type="search" placeholder="Поиск по городам и странам..." autocomplete="off">
+                        </div>
+                        <div class="region-filters" role="group" aria-label="Фильтр региона">
+                            <button class="region-filter active" type="button" data-region="all">Все</button>
+                            <button class="region-filter" type="button" data-region="europe">Европа</button>
+                            <button class="region-filter" type="button" data-region="asia">Азия</button>
+                            <button class="region-filter" type="button" data-region="america">Америка</button>
+                        </div>
+                    </div>
                     <div class="tab-header">
-                        <h3>Список серверов</h3>
+                        <h3>Optimal nodes</h3>
                         <div class="header-actions">
                             <button id="btn-refresh-pings" class="icon-btn-small" title="Проверить все пинги">
                                 <svg viewBox="0 0 24 24" width="18" height="18">
