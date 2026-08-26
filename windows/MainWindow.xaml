@@ -6,11 +6,11 @@
         xmlns:wv2="clr-namespace:Microsoft.Web.WebView2.Wpf;assembly=Microsoft.Web.WebView2.Wpf"
         xmlns:local="clr-namespace:Anarise"
         mc:Ignorable="d"
-        Title="ANARISE VPN" 
-        Height="760"
-        Width="980"
-        MinWidth="820"
-        MinHeight="650"
+        Title="ANARISE VPN"
+        Height="440"
+        Width="520"
+        MinWidth="400"
+        MinHeight="360"
         Background="#070B16"
         WindowStartupLocation="CenterScreen">
     <Grid>
