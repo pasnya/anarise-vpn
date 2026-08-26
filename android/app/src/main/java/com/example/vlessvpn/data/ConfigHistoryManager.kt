@@ -113,8 +113,9 @@ object ConfigHistoryManager {
     }
 
     fun getHistory(context: Context): List<String> {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val jsonStr = prefs.getString(KEY_HISTORY, null) ?: return emptyList()
+        val jsonStr = SecurePreferences.getString(context, KEY_HISTORY)
+            ?: migrateLegacyHistory(context)
+            ?: return emptyList()
         return try {
             val jsonArray = JSONArray(jsonStr)
             val list = mutableListOf<String>()
@@ -137,9 +138,15 @@ object ConfigHistoryManager {
     private fun saveHistory(context: Context, history: List<String>) {
         val jsonArray = JSONArray()
         history.forEach { jsonArray.put(it) }
+        SecurePreferences.putString(context, KEY_HISTORY, jsonArray.toString())
+    }
+
+    private fun migrateLegacyHistory(context: Context): String? {
+        val legacy = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .getString(KEY_HISTORY, null) ?: return null
+        SecurePreferences.putString(context, KEY_HISTORY, legacy)
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putString(KEY_HISTORY, jsonArray.toString())
-            .apply()
+            .edit().remove(KEY_HISTORY).apply()
+        return legacy
     }
 }

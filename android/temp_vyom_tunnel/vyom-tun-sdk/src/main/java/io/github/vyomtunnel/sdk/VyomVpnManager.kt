@@ -358,8 +358,7 @@ object VyomVpnManager {
     // --- PERSISTENCE HELPERS ---
 
     private fun saveConfig(context: Context, config: String) {
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit()
-            .putString(KEY_LAST_CONFIG, config).apply()
+        SecureConfigStore.put(context, config)
     }
 
     private fun setVpnShouldRun(context: Context, shouldRun: Boolean) {
@@ -368,7 +367,15 @@ object VyomVpnManager {
     }
 
     fun getLastConfig(context: Context): String? =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getString(KEY_LAST_CONFIG, null)
+        SecureConfigStore.get(context) ?: migrateLegacyConfig(context)
+
+    private fun migrateLegacyConfig(context: Context): String? {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val legacy = prefs.getString(KEY_LAST_CONFIG, null) ?: return null
+        SecureConfigStore.put(context, legacy)
+        prefs.edit().remove(KEY_LAST_CONFIG).apply()
+        return legacy
+    }
 
     fun wasVpnRunning(context: Context): Boolean =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).getBoolean(KEY_VPN_ALIVE, false)

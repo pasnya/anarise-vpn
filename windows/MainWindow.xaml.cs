@@ -21,6 +21,7 @@ namespace Anarise
     public partial class MainWindow : Window
     {
         private Process coreProcess = null;
+        private readonly CoreProcessManager coreProcessManager = new();
         private bool isConnected = false;
         private string currentConfigLink = "";
         private List<string> configHistory = new List<string>();
@@ -44,10 +45,14 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.13";
+        private const string AppVersion = "1.4.14";
         private const string RequiredXrayVersion = "26.7.11";
-        private const string RequiredXrayDownloadUrl = "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-windows-64.zip";
         private Task binariesSetupTask = Task.CompletedTask;
+        private NetworkStateGuard networkStateGuard;
+        private CancellationTokenSource reconnectCts;
+        private int reconnectAttempts;
+        private bool reconnectInProgress;
+        private readonly StatisticsService statisticsService = new();
 
         // TUN tunnel process
         private Process tun2socksProcess = null;
@@ -61,13 +66,6 @@ namespace Anarise
         private string configHistoryPath;
         private string settingsFilePath;
         private string externalCachePath;
-
-        // Expected SHA256 hashes for binary verification (null = skip check)
-        private static readonly Dictionary<string, string> ExpectedHashes = new()
-        {
-            // Hashes will be populated after first successful download verification
-            // Format: "filename" -> "SHA256_hex_upper"
-        };
 
         private static readonly HttpClient DnsOverHttpsClient = new(new HttpClientHandler
         {
@@ -88,11 +86,14 @@ namespace Anarise
             configHistoryPath = Path.Combine(appDataPath, "history.json");
             settingsFilePath = Path.Combine(appDataPath, "settings.json");
             externalCachePath = Path.Combine(appDataPath, "external_cache.json");
+            networkStateGuard = new NetworkStateGuard(appDataPath);
 
             Directory.CreateDirectory(appDataPath);
             Directory.CreateDirectory(binariesPath);
 
+            networkStateGuard.RecoverInterruptedSession();
             KillOrphanedProcesses();
+            CleanupRuntimeConfigFiles();
             // Remove stale rules left behind by an interrupted previous session.
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
@@ -107,6 +108,8 @@ namespace Anarise
             this.Closing += (s, e) => {
                 StopTun2Socks();
                 StopTunnelCore();
+                CleanupRuntimeConfigFiles();
+                networkStateGuard.Restore();
                 SystemProxyManager.DisableProxy();
                 SystemProxyManager.SetChromiumQuicAllowed(true);
                 SystemProxyManager.SetBrowserQuicBlocked(false);
@@ -305,7 +308,10 @@ namespace Anarise
             {
                 StopTunnelCore();
                 StopTun2Socks();
+                CleanupRuntimeConfigFiles();
+                networkStateGuard.Restore();
                 KillOrphanedProcesses();
+                networkStateGuard.Begin();
 
                 if (!EnsureLocalPortsAvailable())
                 {
@@ -613,17 +619,8 @@ namespace Anarise
                     psi.Environment["MIERU_CONFIG_JSON_FILE"] = configPath;
                 }
 
-                coreProcess = new Process { StartInfo = psi };
-                coreProcess.EnableRaisingEvents = true;
-
-                // Log outputs
-                coreProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) LogToUi(ev.Data); };
-                coreProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) LogToUi(ev.Data); };
-
                 LogToUi($"Запуск ядра: {executable}...");
-                coreProcess.Start();
-                coreProcess.BeginOutputReadLine();
-                coreProcess.BeginErrorReadLine();
+                coreProcess = coreProcessManager.Start(psi, LogToUi, LogToUi);
 
                 // Wait 1.5 seconds to verify if process is still running
                 await Task.Delay(1500);
@@ -698,11 +695,13 @@ namespace Anarise
                 if (gen != connectionGeneration) return;
 
                 isConnected = true;
+                reconnectAttempts = 0;
                 connectionStartTime = DateTime.Now;
                 totalUploadBytes = 0;
                 totalDownloadBytes = 0;
                 lastTunBytesSent = 0;
                 lastTunBytesReceived = 0;
+                statisticsService.Reset();
 
                 PostToUi(new { action = "updateState", state = "CONNECTED" });
                 LogToUi("Подключение установлено успешно!");
@@ -717,6 +716,8 @@ namespace Anarise
             {
                 StopTun2Socks();
                 StopTunnelCore();
+                CleanupRuntimeConfigFiles();
+                networkStateGuard.Restore();
                 SystemProxyManager.DisableProxy();
                 SystemProxyManager.SetChromiumQuicAllowed(true);
                 SystemProxyManager.SetBrowserQuicBlocked(false);
@@ -729,12 +730,16 @@ namespace Anarise
         private void StopConnection()
         {
             System.Threading.Interlocked.Increment(ref connectionGeneration);
+            reconnectCts?.Cancel();
+            reconnectInProgress = false;
             PostToUi(new { action = "updateState", state = "DISCONNECTED" });
             LogToUi("Отключение...");
 
             StopStatsTimer();
             StopTun2Socks();
             StopTunnelCore();
+            CleanupRuntimeConfigFiles();
+            networkStateGuard.Restore();
             SystemProxyManager.DisableProxy();
             SystemProxyManager.SetChromiumQuicAllowed(true);
             SystemProxyManager.SetBrowserQuicBlocked(false);
@@ -744,25 +749,9 @@ namespace Anarise
 
         private void StopTunnelCore()
         {
-            var proc = coreProcess;
-            try
-            {
-                if (proc != null && !proc.HasExited)
-                {
-                    proc.Kill(true);
-                    proc.WaitForExit(3000);
-                }
-            }
-            catch { }
-            finally
-            {
-                if (coreProcess == proc)
-                {
-                    coreProcess = null;
-                }
-                proc?.Dispose();
-                isConnected = false;
-            }
+            coreProcessManager.Stop();
+            coreProcess = null;
+            isConnected = false;
         }
 
         // --- TUN2SOCKS VPN TUNNEL ---
@@ -1267,6 +1256,14 @@ namespace Anarise
         {
             if (!isConnected) return;
 
+            if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode || tun2socksProcess != null))
+            {
+                LogToUi("VPN-ядро или tun2socks неожиданно завершилось.");
+                StopConnection();
+                ScheduleReconnect();
+                return;
+            }
+
             try
             {
                 var tunNic = NetworkInterface.GetAllNetworkInterfaces()
@@ -1279,11 +1276,9 @@ namespace Anarise
                     long bytesSent = stats.BytesSent;
                     long bytesReceived = stats.BytesReceived;
 
-                    currentUploadSpeed = (lastTunBytesSent > 0) ? bytesSent - lastTunBytesSent : 0;
-                    currentDownloadSpeed = (lastTunBytesReceived > 0) ? bytesReceived - lastTunBytesReceived : 0;
-
-                    lastTunBytesSent = bytesSent;
-                    lastTunBytesReceived = bytesReceived;
+                    var snapshot = statisticsService.Update(bytesSent, bytesReceived);
+                    currentUploadSpeed = snapshot.UploadSpeed;
+                    currentDownloadSpeed = snapshot.DownloadSpeed;
                 }
                 else
                 {
@@ -1311,6 +1306,40 @@ namespace Anarise
                 totalDownload = (long)totalDownloadBytes,
                 duration = (long)duration
             });
+        }
+
+        private void ScheduleReconnect()
+        {
+            if (!autoreconnect || reconnectInProgress || string.IsNullOrWhiteSpace(currentConfigLink)) return;
+            if (reconnectAttempts >= 3)
+            {
+                LogToUi("Автопереподключение остановлено после 3 попыток.");
+                return;
+            }
+
+            reconnectAttempts++;
+            reconnectInProgress = true;
+            reconnectCts?.Cancel();
+            reconnectCts = new CancellationTokenSource();
+            var token = reconnectCts.Token;
+            var delaySeconds = (int)Math.Pow(2, reconnectAttempts);
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(delaySeconds), token);
+                    await Dispatcher.InvokeAsync(async () =>
+                    {
+                        reconnectInProgress = false;
+                        if (!token.IsCancellationRequested && !isConnected) await StartConnection();
+                    });
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex) { LogToUi("Ошибка автопереподключения: " + ex.Message); }
+                finally { reconnectInProgress = false; }
+            });
+            LogToUi($"Автопереподключение через {delaySeconds} с (попытка {reconnectAttempts}/3).");
         }
 
         // --- EXIT IP CHECKER ---
@@ -1934,20 +1963,39 @@ namespace Anarise
         // --- BINARY AUTO-DOWNLOADER ---
         private async Task CheckAndDownloadBinaries()
         {
+            TrustedBinaryManifest manifest;
+            try
+            {
+                manifest = TrustedBinaryManifest.Load(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trusted-binaries.json"));
+            }
+            catch (Exception ex)
+            {
+                LogToUi("Загрузка модулей остановлена: доверенный manifest недоступен или поврежден: " + ex.Message);
+                PostToUi(new { action = "downloadProgress", downloading = false, progress = 0 });
+                return;
+            }
+
+            var xrayArtifact = manifest.GetRequired("xray");
+            var hysteriaArtifact = manifest.GetRequired("hysteria");
+            var mieruArtifact = manifest.GetRequired("mieru");
+            var tun2SocksArtifact = manifest.GetRequired("tun2socks");
+            var wintunArtifact = manifest.GetRequired("wintun");
+            var trustedInstallState = LoadTrustedInstallState();
+
             string xrayExe = Path.Combine(binariesPath, "xray.exe");
             string hysteriaExe = Path.Combine(binariesPath, "hysteria.exe");
             string tun2socksExe = Path.Combine(binariesPath, "tun2socks.exe");
             string wintunDll = Path.Combine(binariesPath, "wintun.dll");
             string mieruExe = Path.Combine(binariesPath, "mieru.exe");
 
-            bool needsXray = !File.Exists(xrayExe)
+            bool needsXray = !IsTrustedInstalled("xray", xrayExe, xrayArtifact, trustedInstallState)
                 || !File.Exists(Path.Combine(binariesPath, "geoip.dat"))
                 || !File.Exists(Path.Combine(binariesPath, "geosite.dat"))
                 || !IsXrayVersionAtLeast(xrayExe, RequiredXrayVersion);
-            bool needsHysteria = !File.Exists(hysteriaExe);
-            bool needsTun2Socks = !File.Exists(tun2socksExe);
-            bool needsWintun = !File.Exists(wintunDll);
-            bool needsMieru = !File.Exists(mieruExe);
+            bool needsHysteria = !IsTrustedInstalled("hysteria", hysteriaExe, hysteriaArtifact, trustedInstallState);
+            bool needsTun2Socks = !IsTrustedInstalled("tun2socks", tun2socksExe, tun2SocksArtifact, trustedInstallState);
+            bool needsWintun = !IsTrustedInstalled("wintun", wintunDll, wintunArtifact, trustedInstallState);
+            bool needsMieru = !IsTrustedInstalled("mieru", mieruExe, mieruArtifact, trustedInstallState);
 
             if (needsXray || needsHysteria || needsTun2Socks || needsWintun || needsMieru)
             {
@@ -1965,18 +2013,19 @@ namespace Anarise
                     {
                         LogToUi("Загрузка Xray-core...");
                         string xrayZip = Path.Combine(appDataPath, "xray.zip");
-                        await DownloadFileWithProgress(RequiredXrayDownloadUrl, xrayZip, pos, pos + segSize);
+                        await DownloadVerifiedArtifactWithProgress(xrayArtifact, xrayZip, pos, pos + segSize);
 
                         LogToUi("Распаковка Xray-core...");
                         await Task.Run(() => {
                             ZipFile.ExtractToDirectory(xrayZip, binariesPath, true);
                         });
                         File.Delete(xrayZip);
-                        VerifyBinaryHash(Path.Combine(binariesPath, "xray.exe"), "xray.exe");
                         if (!IsXrayVersionAtLeast(xrayExe, RequiredXrayVersion))
                         {
                             throw new InvalidDataException($"Установлена неподдерживаемая версия Xray; требуется {RequiredXrayVersion} или новее.");
                         }
+                        MarkTrustedInstalled("xray", xrayArtifact, trustedInstallState);
+                        SaveTrustedInstallState(trustedInstallState);
                         LogToUi("Xray-core успешно установлен.");
                         pos += segSize;
                     }
@@ -1984,8 +2033,9 @@ namespace Anarise
                     if (needsHysteria)
                     {
                         LogToUi("Загрузка Hysteria2...");
-                        await DownloadFileWithProgress("https://github.com/apernet/hysteria/releases/latest/download/hysteria-windows-amd64.exe", hysteriaExe, pos, pos + segSize);
-                        VerifyBinaryHash(hysteriaExe, "hysteria.exe");
+                        await DownloadVerifiedArtifactWithProgress(hysteriaArtifact, hysteriaExe, pos, pos + segSize);
+                        MarkTrustedInstalled("hysteria", hysteriaArtifact, trustedInstallState);
+                        SaveTrustedInstallState(trustedInstallState);
                         LogToUi("Hysteria2 успешно установлен.");
                         pos += segSize;
                     }
@@ -1994,14 +2044,15 @@ namespace Anarise
                     {
                         LogToUi("Загрузка Mieru...");
                         string mieruZip = Path.Combine(appDataPath, "mieru.zip");
-                        await DownloadFileWithProgress("https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_windows_amd64.zip", mieruZip, pos, pos + segSize);
+                        await DownloadVerifiedArtifactWithProgress(mieruArtifact, mieruZip, pos, pos + segSize);
 
                         LogToUi("Распаковка Mieru...");
                         await Task.Run(() => {
                             ZipFile.ExtractToDirectory(mieruZip, binariesPath, true);
                         });
                         File.Delete(mieruZip);
-                        VerifyBinaryHash(mieruExe, "mieru.exe");
+                        MarkTrustedInstalled("mieru", mieruArtifact, trustedInstallState);
+                        SaveTrustedInstallState(trustedInstallState);
                         LogToUi("Mieru успешно установлен.");
                         pos += segSize;
                     }
@@ -2010,7 +2061,7 @@ namespace Anarise
                     {
                         LogToUi("Загрузка tun2socks (VPN-туннель)...");
                         string tunZip = Path.Combine(appDataPath, "tun2socks.zip");
-                        await DownloadFileWithProgress("https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-windows-amd64.zip", tunZip, pos, pos + segSize);
+                        await DownloadVerifiedArtifactWithProgress(tun2SocksArtifact, tunZip, pos, pos + segSize);
                         
                         LogToUi("Распаковка tun2socks...");
                         await Task.Run(() => {
@@ -2023,6 +2074,8 @@ namespace Anarise
                             }
                         });
                         File.Delete(tunZip);
+                        MarkTrustedInstalled("tun2socks", tun2SocksArtifact, trustedInstallState);
+                        SaveTrustedInstallState(trustedInstallState);
                         LogToUi("tun2socks успешно установлен.");
                         pos += segSize;
                     }
@@ -2031,7 +2084,7 @@ namespace Anarise
                     {
                         LogToUi("Загрузка Wintun (драйвер TUN)...");
                         string wintunZip = Path.Combine(appDataPath, "wintun.zip");
-                        await DownloadFileWithProgress("https://www.wintun.net/builds/wintun-0.14.1.zip", wintunZip, pos, pos + segSize);
+                        await DownloadVerifiedArtifactWithProgress(wintunArtifact, wintunZip, pos, pos + segSize);
                         
                         LogToUi("Распаковка Wintun...");
                         await Task.Run(() => {
@@ -2049,6 +2102,8 @@ namespace Anarise
                             }
                         });
                         File.Delete(wintunZip);
+                        MarkTrustedInstalled("wintun", wintunArtifact, trustedInstallState);
+                        SaveTrustedInstallState(trustedInstallState);
                         LogToUi("Wintun успешно установлен.");
                     }
 
@@ -2137,42 +2192,102 @@ namespace Anarise
             }
         }
 
-        private bool VerifyBinaryHash(string filePath, string binaryName)
+        private void CleanupRuntimeConfigFiles()
         {
-            if (!ExpectedHashes.TryGetValue(binaryName, out var expectedHash) || string.IsNullOrEmpty(expectedHash))
-                return true; // No hash to check against
+            foreach (var fileName in new[] { "xray_config.json", "hysteria_config.json", "mieru_config.json" })
+            {
+                try
+                {
+                    var path = Path.Combine(appDataPath, fileName);
+                    if (File.Exists(path)) File.Delete(path);
+                }
+                catch { }
+            }
+        }
+
+        private async Task DownloadVerifiedArtifactWithProgress(
+            TrustedBinaryArtifact artifact,
+            string destination,
+            int startPercentage,
+            int endPercentage)
+        {
+            string temporaryPath = destination + ".part";
+            try
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+
+                await DownloadFileWithProgress(artifact.Url, temporaryPath, startPercentage, endPercentage);
+                BinaryIntegrity.VerifySha256(temporaryPath, artifact.Sha256);
+
+                // The temporary file is on the same volume as the destination,
+                // so replacement is atomic from the application's perspective.
+                File.Move(temporaryPath, destination, true);
+                LogToUi($"Проверка SHA-256 пройдена: {Path.GetFileName(destination)}");
+            }
+            finally
+            {
+                if (File.Exists(temporaryPath))
+                    File.Delete(temporaryPath);
+            }
+        }
+
+        private Dictionary<string, string> LoadTrustedInstallState()
+        {
+            var path = Path.Combine(appDataPath, "trusted-installation.json");
+            if (!File.Exists(path))
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             try
             {
-                using var sha256 = System.Security.Cryptography.SHA256.Create();
-                using var stream = File.OpenRead(filePath);
-                byte[] hash = sha256.ComputeHash(stream);
-                string actualHash = BitConverter.ToString(hash).Replace("-", "");
-
-                if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    LogToUi($"WARNING: SHA256 mismatch for {binaryName}: expected {expectedHash}, got {actualHash}");
-                    File.Delete(filePath);
-                    return false;
-                }
-                LogToUi($"SHA256 verified: {binaryName}");
-                return true;
+                return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path))
+                    ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
-            catch (Exception ex)
+            catch
             {
-                LogToUi($"Hash verification failed for {binaryName}: {ex.Message}");
-                return true; // Don't block on verification errors
+                return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             }
+        }
+
+        private bool IsTrustedInstalled(
+            string name,
+            string outputPath,
+            TrustedBinaryArtifact artifact,
+            IReadOnlyDictionary<string, string> state)
+        {
+            return File.Exists(outputPath)
+                && state.TryGetValue(name, out var installedHash)
+                && installedHash.Equals(artifact.Sha256, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void MarkTrustedInstalled(
+            string name,
+            TrustedBinaryArtifact artifact,
+            IDictionary<string, string> state)
+        {
+            state[name] = artifact.Sha256;
+        }
+
+        private void SaveTrustedInstallState(IReadOnlyDictionary<string, string> state)
+        {
+            var path = Path.Combine(appDataPath, "trusted-installation.json");
+            var temporaryPath = path + ".part";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state));
+            File.Move(temporaryPath, path, true);
         }
 
         // --- SETTINGS STORAGE & SYNC ---
         private void LoadSettings()
         {
-            if (File.Exists(settingsFilePath))
+            if (!SecureStorage.TryRead(settingsFilePath, out var json))
+            {
+                json = TryMigratePlaintext(settingsFilePath);
+            }
+
+            if (json != null)
             {
                 try
                 {
-                    string json = File.ReadAllText(settingsFilePath);
                     var settings = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
                     
                     if (settings.TryGetValue("currentConfigLink", out var valLink)) currentConfigLink = valLink?.ToString() ?? "";
@@ -2203,16 +2318,20 @@ namespace Anarise
                 ["vpnMode"] = vpnMode,
                 ["systemProxy"] = systemProxy
             };
-            File.WriteAllText(settingsFilePath, JsonSerializer.Serialize(settings));
+            SecureStorage.Write(settingsFilePath, JsonSerializer.Serialize(settings));
         }
 
         private void LoadHistory()
         {
-            if (File.Exists(configHistoryPath))
+            if (!SecureStorage.TryRead(configHistoryPath, out var json))
+            {
+                json = TryMigratePlaintext(configHistoryPath);
+            }
+
+            if (json != null)
             {
                 try
                 {
-                    string json = File.ReadAllText(configHistoryPath);
                     configHistory = JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
                 }
                 catch { }
@@ -2221,7 +2340,22 @@ namespace Anarise
 
         private void SaveHistory()
         {
-            File.WriteAllText(configHistoryPath, JsonSerializer.Serialize(configHistory));
+            SecureStorage.Write(configHistoryPath, JsonSerializer.Serialize(configHistory));
+        }
+
+        private static string? TryMigratePlaintext(string path)
+        {
+            try
+            {
+                if (!File.Exists(path)) return null;
+                var plaintext = File.ReadAllText(path);
+                SecureStorage.Write(path, plaintext);
+                return plaintext;
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private async Task SyncSettingsAndHistory()
