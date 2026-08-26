@@ -1,0 +1,24 @@
+{
+  "artifacts": {
+    "xray": {
+      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-windows-64.zip",
+      "sha256": "af801b62c4d41d248d3db8016d4c6e2a7ccfb7ed443e3738aeb6f9e062321512"
+    },
+    "hysteria": {
+      "url": "https://github.com/apernet/hysteria/releases/download/app/v2.12.1/hysteria-windows-amd64.exe",
+      "sha256": "2887cd9c70239d780bb48a1953b99c26d981dd71018bb351a3ee7b53a498e3a5"
+    },
+    "mieru": {
+      "url": "https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_windows_amd64.zip",
+      "sha256": "82f5604fb2c8a8fbc6966c7877f8824b692c91870685167c3080cdc0e7f31b75"
+    },
+    "tun2socks": {
+      "url": "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-windows-amd64.zip",
+      "sha256": "1429e2e3b1ea09052da2c65e5005538b5730d63da37e304f4ad6fd2698a66695"
+    },
+    "wintun": {
+      "url": "https://www.wintun.net/builds/wintun-0.14.1.zip",
+      "sha256": "07c256185d6ee3652e09fa55c0b673e2624b565e02c4b9091c79ca7d2f24ef51"
+    }
+  }
+}

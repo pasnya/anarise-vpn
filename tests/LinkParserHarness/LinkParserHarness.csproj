@@ -7,5 +7,9 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\windows\LinkParser.cs" Link="LinkParser.cs" />
+    <Compile Include="..\..\windows\TrustedBinaryManifest.cs" Link="TrustedBinaryManifest.cs" />
+    <Compile Include="..\..\windows\StatisticsService.cs" Link="StatisticsService.cs" />
+    <Compile Include="..\..\windows\CoreHealthMonitor.cs" Link="CoreHealthMonitor.cs" />
+    <Compile Include="..\..\windows\CoreProcessManager.cs" Link="CoreProcessManager.cs" />
   </ItemGroup>
 </Project>
