@@ -58,6 +58,7 @@ fun DashboardScreen(
     val duration by viewModel.connectionDuration.collectAsState()
     val exitIpInfo by viewModel.exitIpInfo.collectAsState()
     val pingResults by viewModel.pingResults.collectAsState()
+    val verificationStatuses by viewModel.verificationStatuses.collectAsState()
     val pingLoading by viewModel.pingLoading.collectAsState()
     val isImporting by viewModel.isImporting.collectAsState()
 
@@ -93,7 +94,7 @@ fun DashboardScreen(
     val currentVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.4.15"
+            pInfo.versionName ?: "1.4.16"
         } catch (e: Exception) {
             "1.1.0"
         }
@@ -106,8 +107,12 @@ fun DashboardScreen(
     }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 1 && externalConfigs.isEmpty() && !externalLoading) {
-            viewModel.fetchAndCheckExternalConfigs()
+        if (selectedTab == 1) {
+            while (true) {
+                viewModel.expireExternalResults()
+                if (viewModel.shouldRefreshExternal()) viewModel.fetchAndCheckExternalConfigs()
+                kotlinx.coroutines.delay(60_000)
+            }
         }
     }
 
@@ -595,6 +600,7 @@ fun DashboardScreen(
                     val ping = pingResults[item]
                     val pingLoad = pingLoading[item] == true
                     ServerCard(
+                        verificationStatus = verificationStatuses[item],
                         displayName = getDisplayLabel(item),
                         link = item,
                         isSelected = item.trim() == vlessLink.trim(),
@@ -645,7 +651,7 @@ fun DashboardScreen(
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            if (externalLoading || externalStatusText.startsWith("Загрузка") || externalStatusText.startsWith("Проверка")) {
+            if ((externalLoading || externalStatusText.startsWith("Загрузка") || externalStatusText.startsWith("Проверка")) && externalConfigs.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier
@@ -691,6 +697,7 @@ fun DashboardScreen(
                 }
                 items(externalConfigs) { (item, ping) ->
                     ServerCard(
+                        verificationStatus = verificationStatuses[item],
                         displayName = getDisplayLabel(item),
                         link = item,
                         isSelected = item.trim() == vlessLink.trim(),

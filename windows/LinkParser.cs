@@ -256,6 +256,7 @@ namespace Anarise
             queryParams.TryGetValue("encryption", out var encryption);
             if (string.IsNullOrEmpty(encryption)) encryption = "none";
             queryParams.TryGetValue("path", out var path);
+            if (network == "grpc" && queryParams.TryGetValue("serviceName", out var serviceName)) path = serviceName;
             queryParams.TryGetValue("pbk", out var publicKey);
             queryParams.TryGetValue("sid", out var shortId);
             queryParams.TryGetValue("fp", out var fingerprint);
@@ -302,7 +303,7 @@ namespace Anarise
 
         private static string ParseVmess(string link, int socksPort, int httpPort)
         {
-            string rawData = link.Substring("vmess://".Length);
+            string rawData = link.Substring("vmess://".Length).Split('#')[0].Replace('-', '+').Replace('_', '/');
             string jsonStr;
             try
             {
@@ -349,6 +350,7 @@ namespace Anarise
                 path: path,
                 headerType: type,
                 fingerprint: "chrome",
+                requestHost: v.ContainsKey("host") ? v["host"]?.ToString() ?? "" : "",
                 socksPort: socksPort,
                 httpPort: httpPort
             );

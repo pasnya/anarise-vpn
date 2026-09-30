@@ -7,7 +7,7 @@
 - Базовый commit: `a4f2e76fb0e06355f29d680748cbcbfb2a770e2e`.
 - Windows target: `net8.0-windows`, WPF, WebView2 `1.0.3967.48`.
 - Android: compile/target SDK `36`, Java/Kotlin toolchain `17`, Gradle wrapper `9.1.0`.
-- Android release: `arm64-v8a`, `minSdk 24`, `versionName 1.4.13`.
+- Android release: `arm64-v8a`, `minSdk 24`, `versionName 1.4.16`.
 
 ## Локальные команды
 
@@ -25,6 +25,14 @@ dotnet run --project tests/LinkParserHarness/LinkParserHarness.csproj --configur
 ```
 
 Тесты используют только синтетические конфигурации и не подключаются к реальным серверам.
+
+### Обход внешних списков
+
+```powershell
+dotnet run --project tests/LinkParserHarness/LinkParserHarness.csproj --configuration Release -- --external-scan-tests
+```
+
+Проверяется поиск по следующим чанкам при неудаче TCP/proxy-проверок, полный обход списка без рабочих серверов и остановка после успешного чанка. Проверки используют синтетические данные без сетевых подключений.
 
 ### Манифест доверенных бинарников Windows
 
@@ -72,6 +80,8 @@ cd android
 ./gradlew.bat assembleRelease
 ```
 
+Release APK подписывается отдельно. Перед локальной сборкой задайте `ANARISE_STORE_FILE`, `ANARISE_STORE_PASSWORD`, `ANARISE_KEY_ALIAS` и `ANARISE_KEY_PASSWORD` в окружении либо в `gradle.properties` (не добавляйте keystore и пароли в Git). CI ожидает GitHub Secrets `ANARISE_KEYSTORE_BASE64`, `ANARISE_STORE_PASSWORD`, `ANARISE_KEY_ALIAS` и `ANARISE_KEY_PASSWORD`; первый secret содержит Base64-представление файла keystore.
+
 APK должен появиться в `android/app/build/outputs/apk/release/app-release.apk`.
 
 ## Базовая матрица тестирования
@@ -85,7 +95,7 @@ APK должен появиться в `android/app/build/outputs/apk/release/ap
 | Parser: Hysteria2 | `hysteria2://` | Пройдено |
 | Parser: Hysteria2 alias | `hy2://` | Пройдено |
 | Parser: Mieru | URI-ссылка | Пройдено |
-| Android компиляция | `gradlew.bat assembleRelease` | Требует настроенный Android SDK |
+| Android debug компиляция | `gradlew.bat assembleDebug` | Пройдена локально; APK проверен `apksigner` |
 | Реальное VPN-подключение | Тестовый сервер каждого протокола | Отдельный этап |
 | Windows 10/11 | Proxy и TUN-режим | Отдельный ручной прогон |
 | Android 7–15 | VPN permission, background, reboot | Отдельный ручной прогон |
@@ -100,5 +110,5 @@ APK должен появиться в `android/app/build/outputs/apk/release/ap
 ## Известные baseline-проблемы
 
 - Windows-сборка проходит без ошибок, но выдает предупреждения nullable-контекста; их устранение относится к последующим этапам.
-- Android-сборка в текущем окружении не запускалась: Android SDK не настроен.
+- Android release подпись требует production keystore и настроенных GitHub Secrets.
 - Smoke-тесты пока находятся в отдельном console harness и не подключены к полноценному test runner.

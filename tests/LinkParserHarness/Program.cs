@@ -2,6 +2,25 @@ using System.Text;
 using System.Text.Json;
 using Anarise;
 
+if (args.Contains("--probe-tests")) return await RunProbeTests();
+if (args.Contains("--external-live-check"))
+{
+    var sources = ExternalSources.Load(Path.Combine(Directory.GetCurrentDirectory(), "shared", "external-sources.json"));
+    var loaded = await ExternalSourceLoader.FetchAsync(sources, Console.WriteLine);
+    Console.WriteLine($"Sources={loaded.LoadedSources}/{sources.Count}, unique configurations={loaded.Links.Count}");
+    var probe = new ServerProbe(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AnariseVPN", "binaries"), Path.GetTempPath());
+    var results = new System.Collections.Concurrent.ConcurrentBag<ServerProbeResult>();
+    await Parallel.ForEachAsync(loaded.Links.Take(30), new ParallelOptions { MaxDegreeOfParallelism = 3 }, async (link, _) => results.Add(await probe.CheckAsync(link)));
+    foreach (var group in results.GroupBy(r => r.Status)) Console.WriteLine($"{group.Key}: {group.Count()}");
+    Console.WriteLine($"Checked={results.Count}, usable={results.Count(r => r.IsUsable)}");
+    return loaded.Links.Count > 0 ? 0 : 1;
+}
+
+if (args.Contains("--external-scan-tests", StringComparer.OrdinalIgnoreCase))
+{
+    return await RunExternalScanTests();
+}
+
 if (args.Contains("--smoke", StringComparer.OrdinalIgnoreCase))
 {
     return RunSmokeTests();
@@ -35,6 +54,63 @@ if (string.IsNullOrEmpty(link))
 
 Console.Write(LinkParser.Parse(link));
 return 0;
+
+static async Task<int> RunProbeTests()
+{
+    void Check(bool ok, string name) { if (!ok) throw new Exception(name); Console.WriteLine($"PASS {name}"); }
+    Check(ServerProbe.IsExpectedResponse(ServerProbe.Targets[0], 204, "") && !ServerProbe.IsExpectedResponse(ServerProbe.Targets[0], 200, "<html>portal</html>") && !ServerProbe.IsExpectedResponse(ServerProbe.Targets[0], 302, ""), "strict-http-response");
+    Check(ServerProbe.IsExpectedResponse(ServerProbe.Targets[2], 200, "success\n") && !ServerProbe.IsExpectedResponse(ServerProbe.Targets[2], 200, "wrong"), "expected-body");
+    Check(ServerProbe.EvaluateSuccess(new[] { "a", "b" }, new long[] { 20, 40 }, false)?.Status == ProbeStatus.Verified, "two-targets");
+    Check(ServerProbe.EvaluateSuccess(new[] { "a" }, new long[] { 20 }, true) == null && ServerProbe.EvaluateSuccess(new[] { "a" }, new long[] { 20, 40 }, false) == null && ServerProbe.EvaluateSuccess(new[] { "a" }, new long[] { 20, 40 }, true)?.Status == ProbeStatus.Limited, "stable-partial-only");
+    const string vless = "vless://00000000-0000-4000-8000-000000000001@example.com:443?type=grpc&serviceName=service&security=tls";
+    var config = ServerProbe.BuildCoreConfig(LinkParser.Parse(vless, 32000, 32001), 32000, 32002);
+    Check(config["routing"]!["rules"]!.AsArray().Count == 1 && config["outbounds"]![0]!["streamSettings"]!["grpcSettings"]!["serviceName"]!.ToString() == "service", "grpc-and-no-direct-bypass");
+    var mieru = ServerProbe.BuildCoreConfig(LinkParser.Parse("mieru://user:password@example.com:443?transport=UDP"), 32000, 32002);
+    Check(mieru["rpcPort"]!.GetValue<int>() == 32002 && mieru["profiles"]![0]!["servers"]![0]!["portBindings"]![0]!["protocol"]!.ToString() == "UDP", "mieru-own-core-and-udp");
+    var hysteria = ServerProbe.BuildCoreConfig(LinkParser.Parse("hy2://password@example.com:443?sni=tls.example&obfs=salamander&obfs-password=secret"), 32000, 32002);
+    Check(hysteria["tls"]!["sni"]!.ToString() == "tls.example" && hysteria["obfs"]!["salamander"]!["password"]!.ToString() == "secret", "hysteria-sni-obfs");
+    var sourceText = vless + "#first\nvmess://synthetic\nss://unsupported";
+    Check(ExternalSources.ParseSubscription(Convert.ToBase64String(Encoding.UTF8.GetBytes(sourceText)).TrimEnd('=')).Count == 2, "base64-supported-protocols");
+    Check(ExternalSources.Interleave(new[] { new List<string> { vless + "#a", "hy2://one" }, new List<string> { vless + "#b", "vmess://two" } }).SequenceEqual(new[] { vless + "#a", "hy2://one", "vmess://two" }), "source-interleave-dedup");
+    var probe = new ServerProbe(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()), Path.GetTempPath());
+    Check((await probe.CheckAsync(vless)).Status == ProbeStatus.MissingEngine && !(new ServerProbeResult(ProbeStatus.EngineStartFailed)).IsUsable, "local-errors-not-dead-servers");
+    Console.WriteLine("Probe/source tests: 10/10 passed");
+    return 0;
+}
+
+static async Task<int> RunExternalScanTests()
+{
+    var cases = new[]
+    {
+        // Reachable proxy only after the first config batch.
+        (Name: "next-config-batch", Count: 201, ReachableFrom: 200, WorkingIndex: 200, ExpectedPings: 201, ExpectedTraffic: 201),
+        // Reachable ports in both batches, but credentials only work in batch two.
+        (Name: "next-batch-after-proxy-failures", Count: 201, ReachableFrom: 0, WorkingIndex: 200, ExpectedPings: 201, ExpectedTraffic: 201),
+        // The first 30 reachable ports fail the proxy check; later ones must run.
+        (Name: "next-traffic-batch", Count: 35, ReachableFrom: 0, WorkingIndex: 34, ExpectedPings: 35, ExpectedTraffic: 35),
+        (Name: "exhaust-list", Count: 405, ReachableFrom: 0, WorkingIndex: -1, ExpectedPings: 405, ExpectedTraffic: 405),
+        (Name: "failed-tcp-still-verified", Count: 405, ReachableFrom: 405, WorkingIndex: 0, ExpectedPings: 200, ExpectedTraffic: 30),
+        (Name: "stop-after-success", Count: 405, ReachableFrom: 0, WorkingIndex: 0, ExpectedPings: 200, ExpectedTraffic: 30)
+    };
+    foreach (var test in cases)
+    {
+        var links = Enumerable.Range(0, test.Count).Select(i => i.ToString()).ToList();
+        var trafficLinks = new System.Collections.Concurrent.ConcurrentBag<string>();
+        var result = await ExternalConfigScanner.ScanAsync(links,
+            link => Task.FromResult(int.Parse(link) >= test.ReachableFrom ? (long)int.Parse(link) : -1L),
+            link => { trafficLinks.Add(link); return Task.FromResult(int.Parse(link) == test.WorkingIndex
+                ? new ServerProbeResult(ProbeStatus.Verified, 42, DateTimeOffset.UtcNow)
+                : new ServerProbeResult(ProbeStatus.NetworkError)); });
+        if (result.CheckedConfigs != test.ExpectedPings || result.TrafficChecks != test.ExpectedTraffic ||
+            trafficLinks.Distinct().Count() != test.ExpectedTraffic ||
+            result.WorkingConfigs.Count != (test.WorkingIndex >= 0 ? 1 : 0) ||
+            (test.WorkingIndex >= 0 && result.WorkingConfigs[0].Link != test.WorkingIndex.ToString()))
+            return Fail($"External scan failed: {test.Name}; pings={result.CheckedConfigs}, traffic={result.TrafficChecks}, uniqueTraffic={trafficLinks.Distinct().Count()}, working={string.Join(",", result.WorkingConfigs.Select(c => c.Link))}");
+        Console.WriteLine($"PASS {test.Name}");
+    }
+    Console.WriteLine($"External scan tests: {cases.Length}/{cases.Length} passed");
+    return 0;
+}
 
 static int RunSmokeTests()
 {

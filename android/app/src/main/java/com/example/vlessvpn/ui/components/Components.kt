@@ -39,7 +39,8 @@ fun ServerCard(
     onSelect: () -> Unit,
     onDelete: (() -> Unit)? = null,
     onPingCheck: () -> Unit,
-    onShare: (() -> Unit)? = null
+    onShare: (() -> Unit)? = null,
+    verificationStatus: String? = null
 ) {
     Card(
         modifier = Modifier
@@ -81,11 +82,12 @@ fun ServerCard(
                     } else if (ping != null) {
                         val pingColor = when {
                             ping < 0 -> MaterialTheme.colorScheme.error
+                            verificationStatus != "Трафик подтверждён" -> Color(0xFFFF9800)
                             ping < 150 -> MaterialTheme.colorScheme.secondary
                             ping < 300 -> Color(0xFFFF9800)
                             else -> MaterialTheme.colorScheme.error
                         }
-                        val pingText = if (ping < 0) "Timeout" else "${ping}ms"
+                        val pingText = if (ping < 0) "Нет подтверждения" else "HTTPS ${ping}ms"
                         Text(
                             text = pingText,
                             fontSize = 10.sp,
@@ -105,12 +107,17 @@ fun ServerCard(
                     maxLines = 1,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
+                Text(
+                    text = verificationStatus ?: "Не проверен",
+                    fontSize = 10.sp,
+                    color = if (verificationStatus == "Трафик подтверждён") MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onPingCheck) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
-                        contentDescription = "Проверить пинг",
+                        contentDescription = "Проверить HTTPS через VPN",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(18.dp)
                     )

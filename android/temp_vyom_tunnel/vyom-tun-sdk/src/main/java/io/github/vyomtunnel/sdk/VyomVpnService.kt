@@ -632,16 +632,16 @@ class VyomVpnService : TProxyService() {
     }
 
     private fun notifyStatus(state: VyomState) {
-        val intent = Intent(VyomVpnManager.ACTION_VPN_STATE)
+        val intent = Intent(VyomVpnManager.ACTION_VPN_STATE).setPackage(packageName)
         intent.putExtra("STATE", state.name)
-        sendBroadcast(intent)
+        sendBroadcast(intent, "$packageName.permission.INTERNAL_VPN_EVENTS")
     }
 
     private fun notifyTraffic(up: Long, down: Long) {
-        val intent = Intent(VyomVpnManager.ACTION_VPN_TRAFFIC)
+        val intent = Intent(VyomVpnManager.ACTION_VPN_TRAFFIC).setPackage(packageName)
         intent.putExtra("UP", up)
         intent.putExtra("DOWN", down)
-        sendBroadcast(intent)
+        sendBroadcast(intent, "$packageName.permission.INTERNAL_VPN_EVENTS")
     }
 
     private fun extractServerIp(config: String): String? {

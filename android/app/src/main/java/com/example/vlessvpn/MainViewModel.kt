@@ -12,8 +12,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import com.example.vlessvpn.data.ConfigHistoryManager
+import com.example.vlessvpn.data.ExternalSources
+import io.github.vyomtunnel.sdk.models.TrafficProbeResult
+import io.github.vyomtunnel.sdk.models.TrafficProbeStatus
+import kotlinx.coroutines.sync.withLock
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
+
+    private companion object {
+        const val MAX_SUBSCRIPTION_BYTES = 1 * 1024 * 1024
+        const val EXTERNAL_CONFIG_BATCH_SIZE = 200
+        const val EXTERNAL_TRAFFIC_BATCH_SIZE = 20
+    }
 
     private val _vpnState = MutableStateFlow(VyomState.DISCONNECTED)
     val vpnState: StateFlow<VyomState> = _vpnState.asStateFlow()
@@ -208,129 +218,47 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val probeMutex = kotlinx.coroutines.sync.Mutex()
+    private val _verificationStatuses = MutableStateFlow<Map<String, String>>(emptyMap())
+    val verificationStatuses = _verificationStatuses.asStateFlow()
+    private var externalCheckedAt = 0L
+    private var externalAttemptAt = 0L
+    fun shouldRefreshExternal() = !_externalLoading.value && _vpnState.value != VyomState.CONNECTED && _vpnState.value != VyomState.CONNECTING &&
+        System.currentTimeMillis() - maxOf(externalCheckedAt, externalAttemptAt) >= 15 * 60 * 1000
+    fun expireExternalResults() {
+        if (externalCheckedAt > 0 && System.currentTimeMillis() - externalCheckedAt >= 15 * 60 * 1000)
+            _verificationStatuses.update { it + _externalConfigs.value.associate { config -> config.first to "Проверка устарела" } }
+    }
+
+    private suspend fun probeTraffic(link: String): TrafficProbeResult = probeMutex.withLock {
+        withContext(Dispatchers.IO) { VyomVpnManager.probeConfigTraffic(getApplication(), link) }
+    }
+
     fun checkServerPing(link: String) {
-        _pingLoading.value = _pingLoading.value + (link to true)
+        _pingLoading.update { it + (link to true) }
         viewModelScope.launch {
-            val hostPort = parseHostPort(link)
-            val latency = if (hostPort != null) {
-                runFullPing(link, hostPort.first, hostPort.second)
-            } else {
-                -1L
-            }
-            _pingResults.value = _pingResults.value + (link to latency)
-            _pingLoading.value = _pingLoading.value + (link to false)
+            try {
+                val result = probeTraffic(link)
+                _pingResults.update { it + (link to result.latency) }
+                _verificationStatuses.update { it + (link to result.label) }
+            } finally { _pingLoading.update { it + (link to false) } }
         }
     }
-
-    private fun parseHostPort(link: String): Pair<String, Int>? {
-        try {
-            val trimmed = link.trim()
-            if (trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
-                val parsed = io.github.vyomtunnel.sdk.utils.LinkParser.parse(trimmed)
-                val obj = org.json.JSONObject(parsed)
-                return Pair(obj.getString("server_host"), obj.getInt("server_port"))
+    private fun parseHostPort(link: String): Pair<String, Int>? = try {
+        val config = org.json.JSONObject(io.github.vyomtunnel.sdk.utils.LinkParser.parse(link))
+        when (config.optString("_protocol")) {
+            "__mieru__" -> Pair(config.getString("server_host"), config.getInt("server_port"))
+            "__hysteria2__" -> {
+                val uri = java.net.URI("udp://" + config.getString("server"))
+                Pair(uri.host, uri.port)
             }
-
-            val normalizedLink = if (trimmed.startsWith("hy2://")) {
-                "hysteria2://" + trimmed.substring(6)
-            } else {
-                trimmed
+            else -> {
+                val settings = config.getJSONArray("outbounds").getJSONObject(0).getJSONObject("settings")
+                val server = (settings.optJSONArray("vnext") ?: settings.getJSONArray("servers")).getJSONObject(0)
+                Pair(server.getString("address"), server.getInt("port"))
             }
-
-            val authority = normalizedLink
-                .substringAfter("://")
-                .substringBefore("?")
-                .substringBefore("#")
-
-            val hostPort = if (authority.contains("@")) {
-                authority.substringAfterLast("@")
-            } else {
-                authority
-            }
-
-            if (hostPort.isBlank()) return null
-
-            val host = if (hostPort.startsWith("[")) {
-                hostPort.substringBeforeLast("]").removePrefix("[")
-            } else if (hostPort.contains(":")) {
-                hostPort.substringBeforeLast(":")
-            } else {
-                hostPort
-            }
-
-            val port = if (hostPort.contains(":") && !hostPort.endsWith("]")) {
-                hostPort.substringAfterLast(":").toIntOrNull() ?: 443
-            } else {
-                443
-            }
-
-            if (host.isNotBlank()) {
-                return Pair(host, port)
-            }
-        } catch (e: Exception) {}
-        return null
-    }
-
-    /**
-     * Determine whether a TLS handshake is needed to properly verify the server.
-     */
-    private fun determineTlsNeeded(link: String): Boolean {
-        try {
-            when {
-                link.startsWith("vless://") -> {
-                    val uri = android.net.Uri.parse(link)
-                    val security = uri.getQueryParameter("security") ?: "none"
-                    return security != "none" && security.isNotEmpty()
-                }
-                link.startsWith("naive+https://") -> return true
-                // Hysteria2 uses QUIC/UDP, TCP check is sufficient
-                link.startsWith("hysteria2://") || link.startsWith("hy2://") -> return false
-            }
-        } catch (e: Exception) {}
-        return false
-    }
-
-    /**
-     * Full ping check: TCP connect + optional TLS handshake.
-     * Timeout: 2.5s (matching Windows version).
-     */
-    private suspend fun runFullPing(link: String, host: String, port: Int): Long = withContext(Dispatchers.IO) {
-        val start = System.currentTimeMillis()
-        try {
-            val socket = java.net.Socket()
-            socket.connect(java.net.InetSocketAddress(host, port), 2500)
-
-            val needsTls = determineTlsNeeded(link)
-            if (needsTls) {
-                try {
-                    val sslContext = javax.net.ssl.SSLContext.getInstance("TLS")
-                    // SECURITY: Trust-all certificates used ONLY for ping latency measurement, NOT for VPN data traffic.
-                    sslContext.init(null, arrayOf(object : javax.net.ssl.X509TrustManager {
-                        override fun checkClientTrusted(chain: Array<java.security.cert.X509Certificate>?, authType: String?) {}
-                        override fun checkServerTrusted(chain: Array<java.security.cert.X509Certificate>?, authType: String?) {}
-                        override fun getAcceptedIssuers(): Array<java.security.cert.X509Certificate> = arrayOf()
-                    }), null)
-
-                    val sslSocket = sslContext.socketFactory.createSocket(socket, host, port, true) as javax.net.ssl.SSLSocket
-                    sslSocket.soTimeout = 2500
-                    sslSocket.startHandshake()
-                    val elapsed = System.currentTimeMillis() - start
-                    sslSocket.close()
-                    elapsed
-                } catch (e: Exception) {
-                    try { socket.close() } catch (_: Exception) {}
-                    -1L // TLS handshake failed
-                }
-            } else {
-                val elapsed = System.currentTimeMillis() - start
-                socket.close()
-                elapsed
-            }
-        } catch (e: Exception) {
-            -1L
         }
-    }
-
+    } catch (_: Exception) { null }
     fun importSubscription(url: String, context: android.content.Context, onComplete: (Int) -> Unit, onError: (String) -> Unit) {
         if (url.isBlank()) {
             onError("URL не может быть пустым")
@@ -373,28 +301,36 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun fetchSubscriptionContent(url: String): String = withContext(Dispatchers.IO) {
+    private suspend fun fetchSubscriptionContent(url: String, maxBytes: Int = MAX_SUBSCRIPTION_BYTES): String = withContext(Dispatchers.IO) {
         val connection = java.net.URL(url).openConnection() as java.net.HttpURLConnection
         try {
             connection.connectTimeout = 10000
             connection.readTimeout = 10000
-            connection.inputStream.bufferedReader().use { it.readText() }
+            connection.setRequestProperty("Cache-Control", "no-cache")
+            connection.setRequestProperty("User-Agent", "AnariseVPN/1.4.16")
+            connection.connect()
+            if (connection.contentLengthLong > maxBytes) {
+                throw java.io.IOException("Подписка превышает допустимый размер")
+            }
+            connection.inputStream.use { input ->
+                val output = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    if (output.size() + count > maxBytes) {
+                        throw java.io.IOException("Подписка превышает допустимый размер")
+                    }
+                    output.write(buffer, 0, count)
+                }
+                output.toString(Charsets.UTF_8.name())
+            }
         } finally {
             connection.disconnect()
         }
     }
 
-    private fun parseSubscriptionContent(content: String): List<String> {
-        val decoded = try {
-            io.github.vyomtunnel.sdk.utils.Base64Utils.decode(content)
-        } catch (e: Exception) {
-            content
-        }
-        val trimmedDecoded = decoded.trim()
-        return trimmedDecoded.split(Regex("[\r\n]+"))
-            .map { it.trim() }
-            .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") || it.startsWith("mieru://") || it.startsWith("mierus://") }
-    }
+    private fun parseSubscriptionContent(content: String): List<String> = ExternalSources.parse(content)
 
     fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {
         viewModelScope.launch(Dispatchers.IO) {
@@ -440,129 +376,106 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _externalStatusText = MutableStateFlow("")
     val externalStatusText: StateFlow<String> = _externalStatusText.asStateFlow()
 
-    private val externalSourceUrls = listOf(
-        "https://raw.githubusercontent.com/nikita29a/FreeProxyList/refs/heads/main/mirror/1.txt",
-        "https://github.com/Epodonios/v2ray-configs/raw/main/Splitted-By-Protocol/vless.txt",
-        "https://raw.githubusercontent.com/V2RayRoot/V2RayConfig/refs/heads/main/Config/vless.txt",
-        "https://raw.githubusercontent.com/ALIILAPRO/v2rayNG-Config/main/sub.txt",
-        "https://github.com/skywrt/v2ray-configs/raw/main/All_Configs_Sub.txt",
-        "https://raw.githubusercontent.com/skywrt/v2ray-Collector/master/v2ray",
-        "https://raw.githubusercontent.com/skywrt/v2ray-Configs/refs/heads/main/Splitted-By-Protocol/vless.txt"
-    )
-
     fun fetchAndCheckExternalConfigs() {
         if (_externalLoading.value) return
+        if (_vpnState.value == VyomState.CONNECTED || _vpnState.value == VyomState.CONNECTING) {
+            _externalStatusText.value = "Отключите VPN перед проверкой внешнего списка"
+            return
+        }
+        externalAttemptAt = System.currentTimeMillis()
         _externalLoading.value = true
-        _externalStatusText.value = "Загрузка списков..."
+        _externalConfigs.value = emptyList()
+        _externalStatusText.value = "Загрузка свежих списков GitHub..."
         viewModelScope.launch {
             try {
-                // Fetch all sources in parallel
-                val allLinks = mutableListOf<String>()
-                coroutineScope {
-                    val fetchJobs = externalSourceUrls.map { url ->
-                        async(Dispatchers.IO) {
+                val sources = ExternalSources.load(getApplication())
+                val sourceLists = coroutineScope {
+                    sources.map { source -> async(Dispatchers.IO) {
+                        var links: List<String> = emptyList()
+                        for (url in listOf(source.url, source.mirrorUrl)) {
                             try {
-                                val content = fetchSubscriptionContent(url)
-                                // Try base64 decode (some sources are base64-encoded)
-                                val decoded = try {
-                                    val trimmed = content.trim()
-                                    val padded = when (trimmed.length % 4) {
-                                        2 -> trimmed + "=="
-                                        3 -> trimmed + "="
-                                        else -> trimmed
-                                    }
-                                    String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT))
-                                } catch (e: Exception) {
-                                    content
-                                }
-                                val parsed = decoded.split(Regex("[\r\n]+"))
-                                    .map { it.trim() }
-                                    .filter { it.startsWith("vless://") || it.startsWith("naive+https://") || it.startsWith("hysteria2://") || it.startsWith("hy2://") || it.startsWith("mieru://") || it.startsWith("mierus://") }
-                                parsed
-                            } catch (e: Exception) {
-                                emptyList()
+                                links = ExternalSources.parse(fetchSubscriptionContent(url, 4 * 1024 * 1024))
+                                if (links.isEmpty()) throw java.io.IOException("Нет поддерживаемых конфигураций")
+                                _logs.update { (it + ("${source.name}: ${links.size} конфигураций" + if (url == source.url) "" else " (зеркало GitHub)")).takeLast(500) }
+                                break
+                            } catch (e: CancellationException) { throw e }
+                            catch (e: Exception) {
+                                _logs.update { (it + ("${source.name}: ошибка загрузки (${e.javaClass.simpleName})" + if (url == source.url) "; проверяю зеркало" else "")).takeLast(500) }
                             }
                         }
-                    }
-                    fetchJobs.awaitAll().forEach { links ->
-                        allLinks.addAll(links)
-                    }
+                        links
+                    } }.awaitAll()
                 }
-
-                val uniqueLinks = allLinks.distinct()
-                
+                val loaded = sourceLists.count { it.isNotEmpty() }
+                val uniqueLinks = ExternalSources.interleave(sourceLists)
                 if (uniqueLinks.isEmpty()) {
-                    _externalStatusText.value = "Конфигурации не найдены"
+                    _externalStatusText.value = "Не удалось получить поддерживаемые конфигурации: источников с ошибками ${sources.size - loaded}/${sources.size}. Подробности в логах."
                     _externalConfigs.value = emptyList()
-                    _externalLoading.value = false
                     return@launch
                 }
-
-                _externalStatusText.value = "Проверка серверов (0/${uniqueLinks.size})..."
-                
-                val checkedConfigs = mutableListOf<Pair<String, Long>>()
                 val completedCount = java.util.concurrent.atomic.AtomicInteger(0)
-                
-                val dispatcher = Dispatchers.IO
+                var trafficChecks = 0
+                val verified = mutableListOf<Pair<String, TrafficProbeResult>>()
+                val failures = mutableMapOf<TrafficProbeStatus, Int>()
                 val semaphore = kotlinx.coroutines.sync.Semaphore(30)
-                
-                coroutineScope {
-                    val jobs = uniqueLinks.map { link ->
-                        async(dispatcher) {
+                for (batch in uniqueLinks.chunked(EXTERNAL_CONFIG_BATCH_SIZE)) {
+                    _externalStatusText.value = "Проверка конфигураций (${completedCount.get()}/${uniqueLinks.size}); источников: $loaded/${sources.size}..."
+                    val candidates = coroutineScope {
+                        batch.map { link -> async(Dispatchers.IO) {
                             semaphore.acquire()
                             try {
-                                val hostPort = parseHostPort(link)
-                                val latency = if (hostPort != null) {
-                                    runFullPing(link, hostPort.first, hostPort.second)
-                                } else {
-                                    -1L
-                                }
-                                val count = completedCount.incrementAndGet()
-                                _externalStatusText.value = "Проверка серверов ($count/${uniqueLinks.size})..."
-                                if (latency >= 0) {
-                                    synchronized(checkedConfigs) {
-                                        checkedConfigs.add(Pair(link, latency))
+                                // Only rank by TCP reachability. QUIC/UDP bypass
+                                // the hint, and a failed TCP hint never discards a config.
+                                val latency = if (link.startsWith("hysteria2://") || link.startsWith("hy2://")) 0L
+                                    else {
+                                        val hostPort = parseHostPort(link)
+                                        if (hostPort == null) -1L else measureTcpLatency(hostPort.first, hostPort.second)
                                     }
-                                }
-                            } finally {
-                                semaphore.release()
-                            }
+                                val count = completedCount.incrementAndGet()
+                                _externalStatusText.value = "Проверка конфигураций ($count/${uniqueLinks.size})..."
+                                Pair(link, latency)
+                            } finally { semaphore.release() }
+                        } }.awaitAll()
+                    }.sortedBy { if (it.second < 0) Long.MAX_VALUE else it.second }
+                    for (trafficBatch in candidates.chunked(EXTERNAL_TRAFFIC_BATCH_SIZE)) {
+                        for ((link, _) in trafficBatch) {
+                            _externalStatusText.value = "Проверка HTTPS через VPN (проверено: $trafficChecks, найдено: ${verified.size})..."
+                            val result = probeTraffic(link)
+                            trafficChecks++
+                            if (result.isUsable) {
+                                _verificationStatuses.update { it + (link to result.label) }
+                                verified.add(Pair(link, result))
+                                _externalConfigs.value = verified.sortedBy { it.second.latency }.map { Pair(it.first, it.second.latency) }
+                            } else failures[result.status] = (failures[result.status] ?: 0) + 1
+                            if (result.status == TrafficProbeStatus.BUSY) throw IllegalStateException("VPN активен или локальный порт занят")
                         }
+                        if (verified.isNotEmpty()) break
                     }
-                    jobs.awaitAll()
+                    if (verified.isNotEmpty()) break
                 }
-                
-                // A reachable port does not mean that the proxy credentials or
-                // transport work. Verify actual HTTPS traffic through the core.
-                val tcpCandidates = checkedConfigs.sortedBy { it.second }
-                _externalStatusText.value = "Проверка прокси-трафика (0/${tcpCandidates.size})..."
-
-                val verifiedConfigs = mutableListOf<Pair<String, Long>>()
-                val verifiedCount = java.util.concurrent.atomic.AtomicInteger(0)
-                coroutineScope {
-                    tcpCandidates.map { candidate ->
-                        async(Dispatchers.IO) {
-                            val isWorking = VyomVpnManager.verifyConfigTraffic(getApplication(), candidate.first)
-                            if (isWorking) {
-                                synchronized(verifiedConfigs) {
-                                    verifiedConfigs.add(candidate)
-                                }
-                            }
-                            val count = verifiedCount.incrementAndGet()
-                            _externalStatusText.value = "Проверка прокси-трафика ($count/${tcpCandidates.size})..."
-                        }
-                    }.awaitAll()
-                }
-
-                val working = verifiedConfigs.sortedBy { it.second }
-                _externalConfigs.value = working
-                _externalStatusText.value = if (working.isEmpty()) "Нет рабочих серверов" else "Найдено рабочих: ${working.size}"
-            } catch (e: Exception) {
-                _externalStatusText.value = "Ошибка: ${e.message}"
-            } finally {
-                _externalLoading.value = false
-            }
+                externalCheckedAt = verified.minOfOrNull { it.second.verifiedAt } ?: System.currentTimeMillis()
+                _externalConfigs.value = verified.sortedBy { it.second.latency }.map { Pair(it.first, it.second.latency) }
+                val full = verified.count { it.second.status == TrafficProbeStatus.VERIFIED }
+                val partial = verified.size - full
+                val localErrors = failures.filterKeys { it == TrafficProbeStatus.MISSING_ENGINE || it == TrafficProbeStatus.ENGINE_START_FAILED }.values.sum()
+                if (failures.isNotEmpty()) _logs.update { (it + ("Результаты проверки: " + failures.entries.joinToString { (status, count) -> "${TrafficProbeResult(status).label}: $count" })).takeLast(500) }
+                val status = if (verified.isNotEmpty()) "Трафик подтверждён: $full, частичная доступность: $partial"
+                    else if (localErrors > 0) "Трафик не подтверждён; ошибок проверки: $localErrors. Подробности в логах."
+                    else "Рабочий HTTPS-трафик не подтверждён"
+                _externalStatusText.value = "$status (проверено: $trafficChecks/${uniqueLinks.size}; источников: $loaded/${sources.size})"
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) {
+                _externalStatusText.value = "Ошибка проверки внешних списков: ${e.message}"
+            } finally { _externalLoading.value = false }
         }
+    }
+
+    private suspend fun measureTcpLatency(host: String, port: Int): Long = withContext(Dispatchers.IO) {
+        val start = android.os.SystemClock.elapsedRealtime()
+        try {
+            java.net.Socket().use { it.connect(java.net.InetSocketAddress(host, port), 2500) }
+            android.os.SystemClock.elapsedRealtime() - start
+        } catch (_: Exception) { -1L }
     }
 }
 

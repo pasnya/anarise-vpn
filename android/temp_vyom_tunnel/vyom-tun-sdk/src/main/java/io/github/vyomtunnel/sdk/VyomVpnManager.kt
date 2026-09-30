@@ -14,6 +14,9 @@ import android.widget.Toast
 import io.github.vyomtunnel.core.NativeEngine
 import io.github.vyomtunnel.sdk.models.VyomIpInfo
 import io.github.vyomtunnel.sdk.utils.AssetUtils
+import io.github.vyomtunnel.sdk.models.TrafficProbeResult
+import io.github.vyomtunnel.sdk.models.TrafficProbeStatus
+import io.github.vyomtunnel.sdk.utils.MieruEngine
 import io.github.vyomtunnel.sdk.utils.HysteriaEngine
 import io.github.vyomtunnel.sdk.utils.LinkParser
 import io.github.vyomtunnel.sdk.utils.VyomLogger
@@ -47,7 +50,7 @@ object VyomVpnManager {
     private const val LOCAL_SOCKS_PORT = 20808
     private val configVerificationLock = Any()
 
-    var currentState: VyomState = VyomState.IDLE
+    @Volatile var currentState: VyomState = VyomState.IDLE
         private set
 
     /**
@@ -214,69 +217,120 @@ object VyomVpnManager {
      * connection. The core uses a fixed local SOCKS port, so this is intentionally
      * serialized and must never run while the user's VPN session is active.
      */
-    fun verifyConfigTraffic(context: Context, link: String): Boolean = synchronized(configVerificationLock) {
-        if (currentState == VyomState.CONNECTED || currentState == VyomState.CONNECTING ||
-            currentState == VyomState.STOPPING) {
-            return@synchronized false
-        }
+    private val probeExecutor = java.util.concurrent.Executors.newFixedThreadPool(3)
 
+    fun verifyConfigTraffic(context: Context, link: String): Boolean = probeConfigTraffic(context, link).isUsable
+
+    fun probeConfigTraffic(context: Context, link: String): TrafficProbeResult = synchronized(configVerificationLock) {
+        if (currentState == VyomState.CONNECTED || currentState == VyomState.CONNECTING || currentState == VyomState.STOPPING)
+            return@synchronized TrafficProbeResult(TrafficProbeStatus.BUSY)
+        // A fixed SOCKS listener is shared with the VPN service. Never test
+        // through a listener left by another session or stop an active session.
         try {
-            val config = LinkParser.parse(link)
-            val isHysteria2 = LinkParser.isHysteria2Config(config)
+            java.net.ServerSocket().use { it.bind(java.net.InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT)) }
+        } catch (_: Exception) { return@synchronized TrafficProbeResult(TrafficProbeStatus.BUSY) }
 
-            NativeEngine.stopXray()
-            HysteriaEngine.stop()
-
-            if (isHysteria2) {
-                val params = org.json.JSONObject(config)
-                HysteriaEngine.start(
-                    context = context,
-                    server = params.getString("server"),
-                    auth = params.getString("auth"),
-                    sni = params.optString("sni"),
-                    insecure = params.optBoolean("insecure", false),
-                    obfsType = params.optString("obfs_type"),
-                    obfsPassword = params.optString("obfs_password"),
-                    alpn = params.optString("alpn")
-                )
-                Thread.sleep(1200)
-            } else {
-                NativeEngine.startXray(config, context.filesDir.absolutePath)
-                Thread.sleep(800)
+        val config = try { LinkParser.parse(link) }
+        catch (_: Exception) { return@synchronized TrafficProbeResult(TrafficProbeStatus.INVALID_CONFIG) }
+        val isHysteria = LinkParser.isHysteria2Config(config)
+        val isMieru = LinkParser.isMieruConfig(config)
+        var started = false
+        try {
+            val params = org.json.JSONObject(config)
+            if (isHysteria || isMieru) {
+                val library = if (isHysteria) "libhysteria2.so" else "libmieru.so"
+                if (!java.io.File(context.applicationInfo.nativeLibraryDir, library).exists())
+                    return@synchronized TrafficProbeResult(TrafficProbeStatus.MISSING_ENGINE)
             }
-
-            val proxy = java.net.Proxy(
-                java.net.Proxy.Type.SOCKS,
-                java.net.InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT)
-            )
-            val endpoints = listOf(
-                "https://www.gstatic.com/generate_204",
-                "https://cp.cloudflare.com/generate_204"
-            )
-            endpoints.any { endpoint ->
-                try {
-                    val connection = java.net.URL(endpoint).openConnection(proxy) as java.net.HttpURLConnection
-                    connection.connectTimeout = 5000
-                    connection.readTimeout = 5000
-                    connection.instanceFollowRedirects = false
-                    try {
-                        connection.responseCode in 200..299
-                    } finally {
-                        connection.disconnect()
-                    }
-                } catch (_: Exception) {
-                    false
+            started = true
+            when {
+                isHysteria -> HysteriaEngine.start(context,
+                    server = params.getString("server"), auth = params.getString("auth"),
+                    sni = params.optString("sni"), insecure = params.optBoolean("insecure", false),
+                    obfsType = params.optString("obfs_type"), obfsPassword = params.optString("obfs_password"), alpn = params.optString("alpn"))
+                isMieru -> MieruEngine.start(context,
+                    server = params.getString("server"), username = params.getString("username"), password = params.getString("password"),
+                    multiplexing = params.optString("multiplexing", "MULTIPLEXING_LOW"), transport = params.optString("transport", "TCP"),
+                    rpcPort = java.net.ServerSocket(0).use { it.localPort })
+                else -> {
+                    AssetUtils.copyAssets(context)
+                    params.put("routing", org.json.JSONObject().put("domainStrategy", "AsIs").put("rules", org.json.JSONArray().put(
+                        org.json.JSONObject().put("type", "field").put("network", "tcp,udp").put("outboundTag", "proxy"))))
+                    val probeConfig = params.toString()
+                    if (NativeEngine.validateConfig(probeConfig, context.filesDir.absolutePath) != null)
+                        return@synchronized TrafficProbeResult(TrafficProbeStatus.INVALID_CONFIG)
+                    NativeEngine.startXray(probeConfig, context.filesDir.absolutePath)
                 }
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Traffic verification failed", e)
-            false
+            val deadline = android.os.SystemClock.elapsedRealtime() + 5000
+            var ready = false
+            while (android.os.SystemClock.elapsedRealtime() < deadline) {
+                try {
+                    java.net.Socket().use { it.connect(java.net.InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT), 200) }
+                    ready = true; break
+                } catch (_: Exception) { Thread.sleep(100) }
+            }
+            if (!ready) return@synchronized TrafficProbeResult(TrafficProbeStatus.ENGINE_START_FAILED)
+
+            val endpoints = listOf(
+                Triple("https://www.gstatic.com/generate_204", 204, ""),
+                Triple("https://cp.cloudflare.com/generate_204", 204, ""),
+                Triple("https://detectportal.firefox.com/success.txt", 200, "success")
+            )
+            val passed = mutableSetOf<String>()
+            val delays = mutableListOf<Long>()
+            var lastFailure = TrafficProbeStatus.NETWORK_ERROR
+            for (attempt in 0..1) {
+                val tasks = endpoints.map { target -> java.util.concurrent.Callable {
+                    val proxy = java.net.Proxy(java.net.Proxy.Type.SOCKS, java.net.InetSocketAddress("127.0.0.1", LOCAL_SOCKS_PORT))
+                    val timer = android.os.SystemClock.elapsedRealtime()
+                    val connection = java.net.URL(target.first).openConnection(proxy) as java.net.HttpURLConnection
+                    connection.connectTimeout = 4000; connection.readTimeout = 4000
+                    connection.instanceFollowRedirects = false; connection.useCaches = false
+                    connection.setRequestProperty("Cache-Control", "no-cache, no-store")
+                    try {
+                        val code = connection.responseCode
+                        var body = ""
+                        if (code == 200) {
+                            connection.inputStream.use { input ->
+                                val bytes = ByteArray(65)
+                                var total = 0
+                                while (total < bytes.size) {
+                                    val read = input.read(bytes, total, bytes.size - total)
+                                    if (read < 0) break
+                                    total += read
+                                }
+                                body = String(bytes, 0, total, Charsets.UTF_8).trim()
+                            }
+                        }
+                        val ok = TrafficProbeResult.expectedResponse(target.second, target.third, code, body)
+                        Triple(target.first, if (ok) android.os.SystemClock.elapsedRealtime() - timer else -1L,
+                            if (ok) TrafficProbeStatus.VERIFIED else TrafficProbeStatus.UNEXPECTED_RESPONSE)
+                    } catch (_: java.net.SocketTimeoutException) { Triple(target.first, -1L, TrafficProbeStatus.TIMEOUT) }
+                    catch (_: Exception) { Triple(target.first, -1L, TrafficProbeStatus.NETWORK_ERROR) }
+                    finally { connection.disconnect() }
+                } }
+                val futures = probeExecutor.invokeAll(tasks, 9, java.util.concurrent.TimeUnit.SECONDS)
+                for (future in futures) {
+                    if (future.isCancelled) { lastFailure = TrafficProbeStatus.TIMEOUT; continue }
+                    val (url, latency, status) = future.get()
+                    if (latency >= 0) { passed.add(url); delays.add(latency) } else lastFailure = status
+                }
+                val success = TrafficProbeResult.evaluateSuccess(passed, delays, attempt == 1)
+                if (success != null) return@synchronized success
+                Thread.sleep(150)
+            }
+            TrafficProbeResult(lastFailure)
+        } catch (_: UnsatisfiedLinkError) {
+            TrafficProbeResult(TrafficProbeStatus.MISSING_ENGINE)
+        } catch (_: Exception) {
+            TrafficProbeResult(TrafficProbeStatus.ENGINE_START_FAILED)
         } finally {
-            NativeEngine.stopXray()
-            HysteriaEngine.stop()
+            if (started) runCatching {
+                when { isHysteria -> HysteriaEngine.stop(); isMieru -> MieruEngine.stop(); else -> NativeEngine.stopXray() }
+            }
         }
     }
-
     // --- LISTENERS & IPC (Inter-Process Communication) ---
 
     fun registerListener(context: Context, listener: VyomListener) {
@@ -310,10 +364,17 @@ object VyomVpnManager {
             addAction(ACTION_SDK_LOGS)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.registerReceiver(internalReceiver, filter, Context.RECEIVER_EXPORTED)
+        val senderPermission = "${context.packageName}.permission.INTERNAL_VPN_EVENTS"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(
+                internalReceiver,
+                filter,
+                senderPermission,
+                null,
+                Context.RECEIVER_NOT_EXPORTED
+            )
         } else {
-            context.registerReceiver(internalReceiver, filter)
+            context.registerReceiver(internalReceiver, filter, senderPermission, null)
         }
     }
 

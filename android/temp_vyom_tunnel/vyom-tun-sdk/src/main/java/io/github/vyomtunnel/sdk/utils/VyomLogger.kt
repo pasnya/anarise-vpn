@@ -26,6 +26,6 @@ object VyomLogger {
             putExtra("MSG", message)
             setPackage(context.packageName)
         }
-        context.sendBroadcast(intent)
+        context.sendBroadcast(intent, "${context.packageName}.permission.INTERNAL_VPN_EVENTS")
     }
 }

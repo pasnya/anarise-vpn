@@ -6,8 +6,9 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <!-- VPN links may contain credentials; do not transfer their encrypted or legacy plaintext stores. -->
+    <exclude domain="sharedpref" path="anarise_secure_prefs.xml" />
+    <exclude domain="sharedpref" path="vless_history_prefs.xml" />
+    <exclude domain="sharedpref" path="vyom_secure_config.xml" />
+    <exclude domain="sharedpref" path="vyom_vpn_prefs.xml" />
 </full-backup-content>

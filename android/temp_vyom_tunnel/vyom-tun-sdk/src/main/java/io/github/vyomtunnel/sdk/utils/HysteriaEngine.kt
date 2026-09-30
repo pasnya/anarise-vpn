@@ -101,7 +101,11 @@ object HysteriaEngine {
             process?.let { proc ->
                 proc.destroy()
                 try {
-                    proc.waitFor()
+                    for (attempt in 0 until 20) {
+                        if (runCatching { proc.exitValue() }.isSuccess) break
+                        Thread.sleep(100)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= 26 && runCatching { proc.exitValue() }.isFailure) proc.destroyForcibly()
                 } catch (_: InterruptedException) {}
             }
         } catch (e: Exception) {
