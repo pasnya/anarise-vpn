@@ -29,7 +29,7 @@ object LinkParser {
                 else -> throw IllegalArgumentException("Unsupported protocol: Only VLESS, VMess, NaiveProxy, Hysteria2 and Mieru are supported")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse link: $link", e)
+            Log.e(TAG, "Failed to parse configuration (${e.javaClass.simpleName})")
             throw e
         }
     }
@@ -200,12 +200,14 @@ object LinkParser {
             fingerprint = params["fp"] ?: "chrome",
             requestHost = params["host"].orEmpty(),
             mode = params["mode"] ?: "auto",
-            extra = params["extra"].orEmpty()
+            extra = params["extra"].orEmpty(),
+            serviceName = params["serviceName"].orEmpty(),
+            allowInsecure = params["allowInsecure"] == "1" || params["insecure"] == "1"
         )
     }
 
     private fun parseVmess(link: String): String {
-        val rawData = link.removePrefix("vmess://")
+        val rawData = link.removePrefix("vmess://").substringBefore('#')
         val jsonStr = try {
             Base64Utils.decode(rawData)
         } catch (e: Exception) {
@@ -226,7 +228,9 @@ object LinkParser {
             network = v.optString("net", "tcp"),
             path = v.optString("path").orEmpty(),
             headerType = v.optString("type").orEmpty(),
-            flow = ""
+            flow = "",
+            requestHost = v.optString("host"),
+            serviceName = v.optString("path")
         )
     }
 
@@ -274,7 +278,8 @@ object LinkParser {
         requestHost: String = "",
         mode: String = "auto",
         extra: String = "",
-        allowInsecure: Boolean = false
+        allowInsecure: Boolean = false,
+        serviceName: String = ""
     ): String {
 
         val config = JSONObject()
@@ -387,7 +392,22 @@ object LinkParser {
                 }
 
                 if (network == "ws") {
-                    put("wsSettings", JSONObject().put("path", path))
+                    put("wsSettings", JSONObject().apply {
+                        put("path", path)
+                        if (requestHost.isNotEmpty()) put("headers", JSONObject().put("Host", requestHost))
+                    })
+                }
+                if (network == "grpc") {
+                    put("grpcSettings", JSONObject().apply {
+                        put("serviceName", serviceName)
+                        put("multiMode", mode == "multi")
+                    })
+                }
+                if (network == "httpupgrade") {
+                    put("httpupgradeSettings", JSONObject().apply {
+                        put("path", path)
+                        if (requestHost.isNotEmpty()) put("host", requestHost)
+                    })
                 }
                 if (network == "tcp" && headerType == "http") {
                     put("tcpSettings", JSONObject().put("header",

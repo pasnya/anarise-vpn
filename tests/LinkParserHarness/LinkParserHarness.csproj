@@ -6,6 +6,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="..\..\windows\ExternalConfigScanner.cs" Link="ExternalConfigScanner.cs" />
+    <Compile Include="..\..\windows\ServerProbe.cs" Link="ServerProbe.cs" />
+    <Compile Include="..\..\windows\ExternalSources.cs" Link="ExternalSources.cs" />
+    <Compile Include="..\..\windows\ExternalSourceLoader.cs" Link="ExternalSourceLoader.cs" />
     <Compile Include="..\..\windows\LinkParser.cs" Link="LinkParser.cs" />
     <Compile Include="..\..\windows\TrustedBinaryManifest.cs" Link="TrustedBinaryManifest.cs" />
     <Compile Include="..\..\windows\StatisticsService.cs" Link="StatisticsService.cs" />
