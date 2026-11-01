@@ -26,7 +26,7 @@ class VpnTileService : TileService() {
 
     override fun onStopListening() {
         super.onStopListening()
-        VyomVpnManager.unregisterListener(applicationContext)
+        VyomVpnManager.unregisterListener(applicationContext, vpnListener)
     }
 
     override fun onClick() {

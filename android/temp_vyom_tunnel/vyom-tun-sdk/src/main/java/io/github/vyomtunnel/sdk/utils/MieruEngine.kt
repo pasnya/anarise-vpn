@@ -27,6 +27,7 @@ object MieruEngine {
         password: String,
         multiplexing: String = "MULTIPLEXING_LOW",
         transport: String = "TCP",
+        rpcPort: Int = 20810,
         logCallback: ((String) -> Unit)? = null
     ) {
         stop()
@@ -43,7 +44,7 @@ object MieruEngine {
 
         // Generate JSON config
         val configFile = File(filesDir, CONFIG_NAME)
-        val configContent = buildConfig(server, username, password, multiplexing, transport)
+        val configContent = buildConfig(server, username, password, multiplexing, transport, rpcPort)
         configFile.writeText(configContent)
 
         Log.i(TAG, "Starting Mieru: server=$server, username=$username")
@@ -81,7 +82,11 @@ object MieruEngine {
             process?.let { proc ->
                 proc.destroy()
                 try {
-                    proc.waitFor()
+                    for (attempt in 0 until 20) {
+                        if (runCatching { proc.exitValue() }.isSuccess) break
+                        Thread.sleep(100)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= 26 && runCatching { proc.exitValue() }.isFailure) proc.destroyForcibly()
                 } catch (_: InterruptedException) {}
             }
         } catch (e: Exception) {
@@ -105,7 +110,8 @@ object MieruEngine {
         username: String,
         password: String,
         multiplexing: String,
-        transport: String
+        transport: String,
+        rpcPort: Int = 20810
     ): String {
         val json = JSONObject()
         
@@ -113,8 +119,8 @@ object MieruEngine {
         val host: String
         val port: Int
         if (server.contains(":")) {
-            host = server.substringBefore(":")
-            port = server.substringAfter(":").toIntOrNull() ?: 443
+            host = server.substringBeforeLast(":").removePrefix("[").removeSuffix("]")
+            port = server.substringAfterLast(":").toIntOrNull() ?: 443
         } else {
             host = server
             port = 443
@@ -153,7 +159,7 @@ object MieruEngine {
 
         json.put("profiles", JSONArray().put(profile))
         json.put("activeProfile", "default")
-        json.put("rpcPort", 20810)
+        json.put("rpcPort", rpcPort)
         json.put("socks5Port", SOCKS_PORT)
         json.put("socks5ListenLAN", false)
         json.put("loggingLevel", "INFO")

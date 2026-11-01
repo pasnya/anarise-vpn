@@ -58,6 +58,7 @@ fun DashboardScreen(
     val duration by viewModel.connectionDuration.collectAsState()
     val exitIpInfo by viewModel.exitIpInfo.collectAsState()
     val pingResults by viewModel.pingResults.collectAsState()
+    val verificationStatuses by viewModel.verificationStatuses.collectAsState()
     val pingLoading by viewModel.pingLoading.collectAsState()
     val isImporting by viewModel.isImporting.collectAsState()
 
@@ -93,7 +94,7 @@ fun DashboardScreen(
     val currentVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.4.15"
+            pInfo.versionName ?: "1.4.16"
         } catch (e: Exception) {
             "1.1.0"
         }
@@ -106,8 +107,12 @@ fun DashboardScreen(
     }
 
     LaunchedEffect(selectedTab) {
-        if (selectedTab == 1 && externalConfigs.isEmpty() && !externalLoading) {
-            viewModel.fetchAndCheckExternalConfigs()
+        if (selectedTab == 1) {
+            while (true) {
+                viewModel.expireExternalResults()
+                if (viewModel.shouldRefreshExternal()) viewModel.fetchAndCheckExternalConfigs()
+                kotlinx.coroutines.delay(60_000)
+            }
         }
     }
 
@@ -288,7 +293,7 @@ fun DashboardScreen(
                         val clipboardText = clipboard.getText()?.text
                         if (!clipboardText.isNullOrBlank()) {
                             val trimmed = clipboardText.trim()
-                            if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
+                            if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                                 val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
                                 if (duplicate != null) {
                                     viewModel.selectConfig(duplicate)
@@ -331,7 +336,7 @@ fun DashboardScreen(
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
                                     val trimmed = rawValue.trim()
-                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
+                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                                         val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
                                         if (duplicate != null) {
                                             viewModel.selectConfig(duplicate)
@@ -595,6 +600,7 @@ fun DashboardScreen(
                     val ping = pingResults[item]
                     val pingLoad = pingLoading[item] == true
                     ServerCard(
+                        verificationStatus = verificationStatuses[item],
                         displayName = getDisplayLabel(item),
                         link = item,
                         isSelected = item.trim() == vlessLink.trim(),
@@ -630,22 +636,29 @@ fun DashboardScreen(
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
-                    IconButton(
-                        onClick = { viewModel.fetchAndCheckExternalConfigs() },
-                        enabled = !externalLoading
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Обновить списки",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (externalLoading) {
+                            TextButton(onClick = { viewModel.cancelExternalScan() }) {
+                                Text("Стоп", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        IconButton(
+                            onClick = { viewModel.fetchAndCheckExternalConfigs() },
+                            enabled = !externalLoading
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Обновить списки",
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
             }
 
-            if (externalLoading || externalStatusText.startsWith("Загрузка") || externalStatusText.startsWith("Проверка")) {
+            if ((externalLoading || externalStatusText.startsWith("Загрузка") || externalStatusText.startsWith("Проверка")) && externalConfigs.isEmpty()) {
                 item {
                     Column(
                         modifier = Modifier
@@ -691,6 +704,7 @@ fun DashboardScreen(
                 }
                 items(externalConfigs) { (item, ping) ->
                     ServerCard(
+                        verificationStatus = verificationStatuses[item],
                         displayName = getDisplayLabel(item),
                         link = item,
                         isSelected = item.trim() == vlessLink.trim(),

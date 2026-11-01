@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to upload to'
+        description: 'Existing release tag to upload to (for example v1.4.15)'
         required: true
-        default: 'v1.3.2'
 
 permissions:
   contents: write
@@ -33,16 +32,27 @@ jobs:
 
     - name: Zip Artifact
       shell: pwsh
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
       run: |
-        Compress-Archive -Path publish\* -DestinationPath AnariseVPN-Windows-x64.zip
+        $tag = $env:RELEASE_TAG
+        if ([string]::IsNullOrEmpty($tag)) {
+          $tag = $env:GITHUB_REF_NAME
+        }
+        Compress-Archive -Path publish\* -DestinationPath "AnariseVPN-Windows-x64-$tag.zip" -Force
 
     - name: Upload to Release
       shell: pwsh
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ inputs.tag }}
       run: |
-        $tag = "${{ github.event.inputs.tag }}"
+        $tag = $env:RELEASE_TAG
         if ([string]::IsNullOrEmpty($tag)) {
-          $tag = "${{ github.ref_name }}"
+          $tag = $env:GITHUB_REF_NAME
         }
-        gh release upload $tag AnariseVPN-Windows-x64.zip --clobber
+        gh release view $tag | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+          throw "Release '$tag' does not exist."
+        }
+        gh release upload $tag "AnariseVPN-Windows-x64-$tag.zip" --clobber

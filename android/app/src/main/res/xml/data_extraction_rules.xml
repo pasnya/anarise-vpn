@@ -5,15 +5,15 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <exclude domain="sharedpref" path="anarise_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="vless_history_prefs.xml" />
+        <exclude domain="sharedpref" path="vyom_secure_config.xml" />
+        <exclude domain="sharedpref" path="vyom_vpn_prefs.xml" />
     </cloud-backup>
-    <!--
     <device-transfer>
-        <include .../>
-        <exclude .../>
+        <exclude domain="sharedpref" path="anarise_secure_prefs.xml" />
+        <exclude domain="sharedpref" path="vless_history_prefs.xml" />
+        <exclude domain="sharedpref" path="vyom_secure_config.xml" />
+        <exclude domain="sharedpref" path="vyom_vpn_prefs.xml" />
     </device-transfer>
-    -->
 </data-extraction-rules>

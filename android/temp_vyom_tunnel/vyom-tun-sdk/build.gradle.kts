@@ -4,11 +4,24 @@ plugins {
 
 android {
     namespace = "io.github.vyomtunnel.sdk"
-    compileSdk = 36
+    compileSdk = (project.findProperty("compileSdkOverride") as? String)?.toIntOrNull() ?: 36
+    ndkVersion = "28.2.13676358"
 
     defaultConfig {
         minSdk = 24
         consumerProguardFiles("consumer-rules.pro")
+        ndk {
+            abiFilters.add("arm64-v8a")
+        }
+    }
+
+    if (project.findProperty("skipNativeBuild") != "true") {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
+        }
     }
 
     compileOptions {
@@ -22,6 +35,7 @@ kotlin {
 }
 
 dependencies {
+    testImplementation(libs.junit)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
 }

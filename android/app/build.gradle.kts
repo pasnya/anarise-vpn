@@ -20,7 +20,8 @@ val releaseSigningConfigured = listOf(
 
 android {
     namespace = "com.example.vlessvpn"
-    compileSdk = 36
+    sourceSets.getByName("main").assets.srcDir("../../shared")
+    compileSdk = (project.findProperty("compileSdkOverride") as? String)?.toIntOrNull() ?: 36
 
     lint {
         checkReleaseBuilds = true
@@ -30,8 +31,8 @@ android {
         applicationId = "com.example.vlessvpn"
         minSdk = 24
         targetSdk = 36
-        versionCode = 27
-        versionName = "1.4.15"
+        versionCode = 28
+        versionName = "1.4.16"
         ndk {
             abiFilters.add("arm64-v8a")
         }

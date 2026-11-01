@@ -101,7 +101,11 @@ object HysteriaEngine {
             process?.let { proc ->
                 proc.destroy()
                 try {
-                    proc.waitFor()
+                    for (attempt in 0 until 20) {
+                        if (runCatching { proc.exitValue() }.isSuccess) break
+                        Thread.sleep(100)
+                    }
+                    if (android.os.Build.VERSION.SDK_INT >= 26 && runCatching { proc.exitValue() }.isFailure) proc.destroyForcibly()
                 } catch (_: InterruptedException) {}
             }
         } catch (e: Exception) {
@@ -181,7 +185,7 @@ object HysteriaEngine {
             val proc = process ?: return "unknown"
             // Android API 26+ has pid()
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                proc.javaClass.getMethod("pid").invoke(proc).toString()
+                proc.javaClass.getMethod("pid").invoke(proc)?.toString() ?: "unknown"
             } else {
                 val f = proc.javaClass.getDeclaredField("pid")
                 f.isAccessible = true

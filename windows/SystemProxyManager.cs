@@ -19,7 +19,7 @@ namespace Anarise
     {
         private sealed class RegistryValueSnapshot
         {
-            public object Value { get; init; }
+            public required object Value { get; init; }
             public RegistryValueKind Kind { get; init; }
         }
 
@@ -33,6 +33,7 @@ namespace Anarise
         private const string QUIC_POLICY_VALUE = "QuicAllowed";
         private const string QUIC_FIREWALL_RULE = "Anarise VPN - Block Browser QUIC";
         private const string IPV6_FIREWALL_RULE = "Anarise VPN - Block IPv6";
+        private const string KILL_SWITCH_FIREWALL_RULE = "Anarise VPN - Kill Switch Block";
         private static readonly string[] ChromiumPolicyPaths =
         {
             @"Software\Policies\Google\Chrome",
@@ -230,6 +231,75 @@ namespace Anarise
             // netsh rejects the zero-length IPv6 prefix (::/0) on some Windows
             // builds. Two /1 prefixes cover the complete IPv6 address space.
             return RunNetsh($"advfirewall firewall add rule name=\"{IPV6_FIREWALL_RULE}\" dir=out action=block remoteip=::/1,8000::/1 enable=yes profile=any");
+        }
+
+        // Kill Switch blocks non-loopback/non-LAN outbound IPv4/IPv6 traffic
+        // except to the active VPN server IP when the tunnel drops unexpectedly.
+        public static bool SetKillSwitchBlocked(bool blocked, string? allowedServerIp = null)
+        {
+            DeleteFirewallRule(KILL_SWITCH_FIREWALL_RULE);
+            if (!blocked) return true;
+
+            var ipv4Ranges = new List<string>
+            {
+                "1.0.0.0-9.255.255.255",
+                "11.0.0.0-126.255.255.255",
+                "128.0.0.0-169.253.255.255",
+                "169.255.0.0-172.15.255.255",
+                "172.32.0.0-192.167.255.255",
+                "192.169.0.0-223.255.255.255"
+            };
+
+            if (!string.IsNullOrWhiteSpace(allowedServerIp) && System.Net.IPAddress.TryParse(allowedServerIp, out var serverAddr) &&
+                serverAddr.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+            {
+                ipv4Ranges = ExcludeIpFromRanges(ipv4Ranges, serverAddr);
+            }
+
+            string remoteIpSpec = string.Join(",", ipv4Ranges);
+            bool v4Ok = RunNetsh($"advfirewall firewall add rule name=\"{KILL_SWITCH_FIREWALL_RULE}\" dir=out action=block remoteip={remoteIpSpec} enable=yes profile=any");
+            bool v6Ok = RunNetsh($"advfirewall firewall add rule name=\"{KILL_SWITCH_FIREWALL_RULE}\" dir=out action=block remoteip=::/1,8000::/1 enable=yes profile=any");
+            return v4Ok && v6Ok;
+        }
+
+        private static List<string> ExcludeIpFromRanges(List<string> ranges, System.Net.IPAddress ip)
+        {
+            uint target = IpToUint(ip);
+            var result = new List<string>();
+            foreach (var range in ranges)
+            {
+                var parts = range.Split('-');
+                uint start = IpToUint(System.Net.IPAddress.Parse(parts[0]));
+                uint end = IpToUint(System.Net.IPAddress.Parse(parts[1]));
+                if (target < start || target > end)
+                {
+                    result.Add(range);
+                    continue;
+                }
+                if (target > start)
+                {
+                    result.Add($"{UintToIp(start)}-{UintToIp(target - 1)}");
+                }
+                if (target < end)
+                {
+                    result.Add($"{UintToIp(target + 1)}-{UintToIp(end)}");
+                }
+            }
+            return result;
+        }
+
+        private static uint IpToUint(System.Net.IPAddress ip)
+        {
+            byte[] bytes = ip.GetAddressBytes();
+            if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            return BitConverter.ToUInt32(bytes, 0);
+        }
+
+        private static string UintToIp(uint value)
+        {
+            byte[] bytes = BitConverter.GetBytes(value);
+            if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
+            return new System.Net.IPAddress(bytes).ToString();
         }
 
         private static IEnumerable<string> FindBrowserExecutables()

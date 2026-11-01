@@ -4,6 +4,9 @@ let appState = {
     selectedConfig: '',
     configHistory: [], // list of config strings
     externalConfigs: [], // list of { link, latency }
+    externalCheckedAt: 0,
+    externalLastAttempt: 0,
+    verificationStatuses: {},
     pingResults: {}, // map of link -> latency
     pingLoading: {}, // map of link -> boolean
     logs: [],
@@ -73,6 +76,7 @@ function handleHostMessage(msg) {
             break;
         case 'updatePing':
             appState.pingResults[msg.link] = msg.latency;
+            appState.verificationStatuses[msg.link] = msg.verificationStatus || '';
             appState.pingLoading[msg.link] = false;
             updateServerPingBadge(msg.link, msg.latency, false);
             break;
@@ -82,10 +86,17 @@ function handleHostMessage(msg) {
             break;
         case 'updateExternalConfigs':
             appState.externalConfigs = msg.configs || [];
+            if (msg.checkedAt) appState.externalCheckedAt = Date.parse(msg.checkedAt);
             renderExternalConfigs();
             break;
         case 'updateExternalStatus':
             document.getElementById('external-status').innerText = msg.statusText;
+            break;
+        case 'updateExternalScanning':
+            const cancelBtn = document.getElementById('btn-cancel-external');
+            if (cancelBtn) {
+                cancelBtn.classList.toggle('hidden', !msg.scanning);
+            }
             break;
         case 'addLog':
             appendLogLine(msg.log);
@@ -155,7 +166,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Refresh buttons
     document.getElementById('btn-refresh-pings').addEventListener('click', () => sendToHost('checkAllPings'));
-    document.getElementById('btn-refresh-external').addEventListener('click', () => sendToHost('refreshExternal'));
+    document.getElementById('btn-refresh-external').addEventListener('click', () => requestExternalRefresh(true));
+    const cancelExternalBtn = document.getElementById('btn-cancel-external');
+    if (cancelExternalBtn) {
+        cancelExternalBtn.addEventListener('click', () => sendToHost('cancelExternal'));
+    }
 
     // Copy logs
     document.getElementById('btn-copy-logs').addEventListener('click', () => {
@@ -199,7 +214,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('chk-bypass-lan').addEventListener('change', (e) => {
         sendToHost('saveSetting', { name: 'bypassLan', value: e.target.checked });
     });
-    document.getElementById('btn-split-tunnel').addEventListener('click', () => {
+    document.getElementById('btn-split-tunnel').addEventListener('click', (e) => {
+        if (e.target.closest('.toggle-switch')) return;
         const chk = document.getElementById('chk-bypass-lan');
         chk.checked = !chk.checked;
         sendToHost('saveSetting', { name: 'bypassLan', value: chk.checked });
@@ -260,10 +276,22 @@ function switchTab(clickedBtn, tabId) {
     document.getElementById(tabId).classList.add('active');
 
     // Trigger actions when entering specific tabs
-    if (tabId === 'tab-external' && appState.externalConfigs.length === 0) {
-        sendToHost('refreshExternal');
-    }
+    if (tabId === 'tab-external') requestExternalRefresh();
 }
+
+function requestExternalRefresh(force = false) {
+    const latest = Math.max(appState.externalCheckedAt, appState.externalLastAttempt);
+    if (!force && (Date.now() - latest < 15 * 60 * 1000 || appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING')) return;
+    appState.externalLastAttempt = Date.now();
+    sendToHost('refreshExternal');
+}
+
+setInterval(() => {
+    if (document.getElementById('tab-external')?.classList.contains('active')) {
+        renderExternalConfigs();
+        requestExternalRefresh();
+    }
+}, 60 * 1000);
 
 function activateTab(tabId) {
     const btn = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
@@ -475,7 +503,7 @@ function renderServersList() {
         const ping = appState.pingResults[link];
         const loading = appState.pingLoading[link] === true;
 
-        const card = createServerCard(link, isSelected, ping, loading, true);
+        const card = createServerCard(link, isSelected, ping, loading, true, appState.verificationStatuses[link]);
         list.appendChild(card);
     });
 }
@@ -509,14 +537,16 @@ function renderExternalConfigs() {
         const ping = item.latency;
         const isSelected = (link.trim() === appState.selectedConfig.trim());
 
-        const card = createServerCard(link, isSelected, ping, false, false);
+        const stale = item.verifiedAt && Date.now() - Date.parse(item.verifiedAt) >= 15 * 60 * 1000;
+        const card = createServerCard(link, isSelected, stale ? undefined : ping, false, false, stale ? 'Проверка устарела' : item.verificationStatus);
         list.appendChild(card);
     });
 }
 
-function createServerCard(link, isSelected, ping, loading, showDelete = true) {
+function createServerCard(link, isSelected, ping, loading, showDelete = true, verificationStatus = '') {
     const card = document.createElement('div');
     card.className = 'server-card' + (isSelected ? ' selected' : '');
+    card.dataset.link = link;
     
     let startX = 0;
     let startY = 0;
@@ -571,7 +601,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
 
     const metaSpan = document.createElement('span');
     metaSpan.className = 'server-meta';
-    metaSpan.innerText = getProtocolHost(link);
+    metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' · ' + verificationStatus : ' · Не проверен');
     detailsDiv.appendChild(metaSpan);
     card.appendChild(detailsDiv);
 
@@ -587,10 +617,11 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
         const badge = document.createElement('span');
         if (ping < 0) {
             badge.className = 'ping-badge high';
-            badge.innerText = 'timeout';
+            badge.innerText = 'Нет подтверждения';
         } else {
             badge.className = 'ping-badge' + (ping > 300 ? ' high' : (ping > 150 ? ' medium' : ''));
-            badge.innerText = `${ping} ms`;
+            badge.innerText = `HTTPS ${ping} ms`;
+            if (verificationStatus === 'Частичная доступность') badge.className = 'ping-badge medium';
         }
         pingArea.appendChild(badge);
     } else {
@@ -598,7 +629,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
         const pingBtn = document.createElement('span');
         pingBtn.className = 'text-link-btn';
         pingBtn.style.fontSize = '11px';
-        pingBtn.innerText = 'ping';
+        pingBtn.innerText = 'Проверить';
         pingBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             sendToHost('checkServerPing', { link });
@@ -653,8 +684,47 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true) {
 }
 
 function updateServerPingBadge(link, latency, loading) {
-    // Re-render server list to update badges cleanly
-    renderServersList();
+    const list = document.getElementById('servers-list');
+    if (!list) return;
+    const card = Array.from(list.querySelectorAll('.server-card')).find(el => el.dataset.link === link);
+    if (!card) {
+        renderServersList();
+        return;
+    }
+    const verificationStatus = appState.verificationStatuses[link] || '';
+    const metaSpan = card.querySelector('.server-meta');
+    if (metaSpan) {
+        metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' · ' + verificationStatus : ' · Не проверен');
+    }
+    const pingArea = card.querySelector('.server-ping-area');
+    if (!pingArea) return;
+    pingArea.innerHTML = '';
+    if (loading) {
+        const spinner = document.createElement('div');
+        spinner.className = 'ping-loading-spinner';
+        pingArea.appendChild(spinner);
+    } else if (latency !== undefined && latency !== null) {
+        const badge = document.createElement('span');
+        if (latency < 0) {
+            badge.className = 'ping-badge high';
+            badge.innerText = 'Нет подтверждения';
+        } else {
+            badge.className = 'ping-badge' + (latency > 300 ? ' high' : (latency > 150 ? ' medium' : ''));
+            badge.innerText = `HTTPS ${latency} ms`;
+            if (verificationStatus === 'Частичная доступность') badge.className = 'ping-badge medium';
+        }
+        pingArea.appendChild(badge);
+    } else {
+        const pingBtn = document.createElement('span');
+        pingBtn.className = 'text-link-btn';
+        pingBtn.style.fontSize = '11px';
+        pingBtn.innerText = 'Проверить';
+        pingBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            sendToHost('checkServerPing', { link });
+        });
+        pingArea.appendChild(pingBtn);
+    }
 }
 
 // --- LOGS MANAGEMENT ---

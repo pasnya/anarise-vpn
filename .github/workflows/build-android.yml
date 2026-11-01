@@ -7,9 +7,8 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to upload to'
+        description: 'Existing release tag to upload to (for example v1.4.15)'
         required: true
-        default: 'v1.3.5'
 
 permissions:
   contents: write
@@ -31,19 +30,47 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
 
+    - name: Configure Android release signing
+      env:
+        ANDROID_KEYSTORE_BASE64: ${{ secrets.ANARISE_KEYSTORE_BASE64 }}
+        ANARISE_STORE_PASSWORD: ${{ secrets.ANARISE_STORE_PASSWORD }}
+        ANARISE_KEY_ALIAS: ${{ secrets.ANARISE_KEY_ALIAS }}
+        ANARISE_KEY_PASSWORD: ${{ secrets.ANARISE_KEY_PASSWORD }}
+      run: |
+        for name in ANDROID_KEYSTORE_BASE64 ANARISE_STORE_PASSWORD ANARISE_KEY_ALIAS ANARISE_KEY_PASSWORD; do
+          if [ -z "${!name}" ]; then
+            echo "::error::Missing required repository secret for $name."
+            exit 1
+          fi
+        done
+        keystore_path="$RUNNER_TEMP/anarise-release.jks"
+        printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+        echo "ANARISE_STORE_FILE=$keystore_path" >> "$GITHUB_ENV"
+
     - name: Grant execute permission for gradlew
       run: chmod +x android/gradlew
 
     - name: Build Release APK
       working-directory: android
+      env:
+        ANARISE_STORE_PASSWORD: ${{ secrets.ANARISE_STORE_PASSWORD }}
+        ANARISE_KEY_ALIAS: ${{ secrets.ANARISE_KEY_ALIAS }}
+        ANARISE_KEY_PASSWORD: ${{ secrets.ANARISE_KEY_PASSWORD }}
       run: ./gradlew assembleRelease
 
     - name: Upload to Release
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ inputs.tag }}
       run: |
-        tag="${{ github.event.inputs.tag }}"
+        tag="$RELEASE_TAG"
         if [ -z "$tag" ]; then
-          tag="${{ github.ref_name }}"
+          tag="$GITHUB_REF_NAME"
         fi
-        gh release upload "$tag" android/app/build/outputs/apk/release/app-release.apk --clobber
+        if ! gh release view "$tag" >/dev/null 2>&1; then
+          echo "::error::Release '$tag' does not exist."
+          exit 1
+        fi
+        asset="AnariseVPN-Android-arm64-${tag}.apk"
+        cp android/app/build/outputs/apk/release/app-release.apk "$asset"
+        gh release upload "$tag" "$asset" --clobber
