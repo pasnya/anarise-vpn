@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Anarise</RootNamespace>
+    <AssemblyName>Anarise</AssemblyName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\windows\LinkParser.cs" Link="LinkParser.cs" />
+    <Compile Include="..\windows\ServerProbe.cs" Link="ServerProbe.cs" />
+    <Compile Include="..\windows\ExternalConfigScanner.cs" Link="ExternalConfigScanner.cs" />
+    <Compile Include="..\windows\ExternalSources.cs" Link="ExternalSources.cs" />
+    <Compile Include="..\windows\ExternalSourceLoader.cs" Link="ExternalSourceLoader.cs" />
+    <Compile Include="..\windows\StatisticsService.cs" Link="StatisticsService.cs" />
+    <Compile Include="..\windows\CoreProcessManager.cs" Link="CoreProcessManager.cs" />
+    <Compile Include="..\windows\CoreHealthMonitor.cs" Link="CoreHealthMonitor.cs" />
+    <Compile Include="..\windows\TrustedBinaryManifest.cs" Link="TrustedBinaryManifest.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\shared\external-sources.json" Link="external-sources.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\windows\wwwroot\**\*" Link="wwwroot\%(RecursiveDir)%(FileName)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="trusted-binaries.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

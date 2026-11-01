@@ -1,0 +1,61 @@
+name: Build macOS Client
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to upload to (for example v1.4.16)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x'
+
+    - name: Build and Package macOS arm64
+      run: |
+        tag="${{ inputs.tag }}"
+        if [ -z "$tag" ]; then
+          tag="$GITHUB_REF_NAME"
+        fi
+        chmod +x macos/build-macos.sh
+        ./macos/build-macos.sh osx-arm64
+        zip -r "AnariseVPN-macOS-arm64-$tag.zip" macos/Anarise.app
+
+    - name: Build and Package macOS x64
+      run: |
+        tag="${{ inputs.tag }}"
+        if [ -z "$tag" ]; then
+          tag="$GITHUB_REF_NAME"
+        fi
+        ./macos/build-macos.sh osx-x64
+        zip -r "AnariseVPN-macOS-x64-$tag.zip" macos/Anarise.app
+
+    - name: Upload to Release
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        RELEASE_TAG: ${{ inputs.tag }}
+      run: |
+        tag="$RELEASE_TAG"
+        if [ -z "$tag" ]; then
+          tag="$GITHUB_REF_NAME"
+        fi
+        if ! gh release view "$tag" >/dev/null 2>&1; then
+          echo "::error::Release '$tag' does not exist."
+          exit 1
+        fi
+        gh release upload "$tag" "AnariseVPN-macOS-arm64-$tag.zip" "AnariseVPN-macOS-x64-$tag.zip" --clobber

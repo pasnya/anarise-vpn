@@ -1,0 +1,20 @@
+{
+  "artifacts": {
+    "xray": {
+      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-macos-arm64-v8a.zip",
+      "sha256": "61f8f74d099098af710fa43613d9934d97b901dee909801d34f496cd463956d1"
+    },
+    "hysteria": {
+      "url": "https://github.com/HyNetworks/hysteria/releases/download/app/v2.12.1/hysteria-darwin-arm64",
+      "sha256": "dd5065293acea1cd961b452c6c7b58217cd1056496d7616f5a005a1d38d91c40"
+    },
+    "mieru": {
+      "url": "https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_darwin_arm64.tar.gz",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "tun2socks": {
+      "url": "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-darwin-arm64.zip",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

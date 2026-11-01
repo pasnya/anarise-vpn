@@ -62,3 +62,18 @@ jobs:
       - name: Build debug APK and run unit tests
         working-directory: android
         run: ./gradlew assembleDebug testDebugUnitTest --no-daemon
+
+  macos:
+    name: macOS client build
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build macOS client
+        run: dotnet build macos/Anarise.Mac.csproj --configuration Release --nologo

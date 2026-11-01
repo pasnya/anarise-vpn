@@ -20,6 +20,7 @@
 
 *   📂 [android](android) — Мобильный клиент под Android (Kotlin, Jetpack Compose, Material 3, vyom-tun-sdk на Go/C++, ядра Hysteria2 и Mieru).
 *   📂 [windows](windows) — Десктопный клиент под Windows (.NET 8.0 WPF, WebView2 HTML/CSS/JS frontend, управление ядрами Xray-core, Hysteria2 и Mieru).
+*   📂 [macos](macos) — Десктопный клиент под macOS (.NET 8.0, WebKit/WKWebView, системный прокси networksetup, pfctl Kill Switch, поддержка Apple Silicon M1-M4 и Intel).
 
 ---
 
@@ -70,6 +71,31 @@ cd windows
 dotnet publish -c Release -r win-x64 --self-contained false
 ```
 Результат сборки будет находиться в папке `bin/Release/net8.0-windows/publish/`.
+
+---
+
+## Клиент macOS (/macos)
+
+Легковесный десктопный клиент под macOS на базе .NET 8, использующий нативный WebKit (WKWebView) для отображения идентичного интерфейса и системные утилиты macOS для управления сетью.
+
+### Основные фичи
+*   **Системный прокси macOS** — автоматическое переключение SOCKS5/HTTP прокси через системную утилиту 
+etworksetup с автоопределением активного сетевого сервиса (Wi-Fi/Ethernet).
+*   **Kill Switch через pfctl** — надёжная защита от утечек данных при разрыве VPN-соединения с помощью пакетного фильтра macOS (pfctl).
+*   **Идентичный функционал и UI** — полная поддержка VLESS, VMess, Hysteria2 и Mieru, внешних каталогов, параллельного сканирования, замера скорости и истории.
+*   **Кроссплатформенная архитектура** — поддержка как Apple Silicon (osx-arm64 для M1/M2/M3/M4), так и Intel (osx-x64).
+
+### Сборка
+Требуется .NET 8.0 SDK.
+`ash
+cd macos
+# Сборка для Apple Silicon (M1/M2/M3/M4):
+./build-macos.sh osx-arm64
+
+# Сборка для Intel Mac:
+./build-macos.sh osx-x64
+`
+Результат сборки упаковывается в готовый бандл приложения: macos/Anarise.app.
 
 ---
 

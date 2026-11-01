@@ -34,10 +34,13 @@ let appState = {
     serverRegion: 'all'
 };
 
-// --- WEBVIEW2 COMMUNICATION BRIDGE ---
+// --- WEBVIEW2 / PHOTINO COMMUNICATION BRIDGE ---
 function sendToHost(action, data = {}) {
+    const payload = { action, ...data };
     if (window.chrome && window.chrome.webview && window.chrome.webview.postMessage) {
-        window.chrome.webview.postMessage({ action, ...data });
+        window.chrome.webview.postMessage(payload);
+    } else if (window.external && window.external.sendMessage) {
+        window.external.sendMessage(JSON.stringify(payload));
     } else {
         console.log("Mock sending to host:", action, data);
     }
@@ -48,6 +51,15 @@ if (window.chrome && window.chrome.webview) {
     window.chrome.webview.addEventListener('message', event => {
         const msg = event.data;
         handleHostMessage(msg);
+    });
+} else if (window.external && window.external.receiveMessage) {
+    window.external.receiveMessage(message => {
+        try {
+            const data = typeof message === 'string' ? JSON.parse(message) : message;
+            handleHostMessage(data);
+        } catch (e) {
+            console.error("Failed to parse host message:", e);
+        }
     });
 }
 
