@@ -293,7 +293,7 @@ fun DashboardScreen(
                         val clipboardText = clipboard.getText()?.text
                         if (!clipboardText.isNullOrBlank()) {
                             val trimmed = clipboardText.trim()
-                            if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
+                            if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                                 val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
                                 if (duplicate != null) {
                                     viewModel.selectConfig(duplicate)
@@ -336,7 +336,7 @@ fun DashboardScreen(
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
                                     val trimmed = rawValue.trim()
-                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
+                                    if (trimmed.startsWith("vless://") || trimmed.startsWith("vmess://") || trimmed.startsWith("naive+https://") || trimmed.startsWith("hysteria2://") || trimmed.startsWith("hy2://") || trimmed.startsWith("mieru://") || trimmed.startsWith("mierus://")) {
                                         val duplicate = com.example.vlessvpn.data.ConfigHistoryManager.findDuplicate(context, trimmed)
                                         if (duplicate != null) {
                                             viewModel.selectConfig(duplicate)
@@ -636,16 +636,23 @@ fun DashboardScreen(
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
-                    IconButton(
-                        onClick = { viewModel.fetchAndCheckExternalConfigs() },
-                        enabled = !externalLoading
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Обновить списки",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(20.dp)
-                        )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (externalLoading) {
+                            TextButton(onClick = { viewModel.cancelExternalScan() }) {
+                                Text("Стоп", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        IconButton(
+                            onClick = { viewModel.fetchAndCheckExternalConfigs() },
+                            enabled = !externalLoading
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Обновить списки",
+                                tint = MaterialTheme.colorScheme.secondary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))

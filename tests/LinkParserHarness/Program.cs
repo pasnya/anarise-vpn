@@ -65,6 +65,10 @@ static async Task<int> RunProbeTests()
     const string vless = "vless://00000000-0000-4000-8000-000000000001@example.com:443?type=grpc&serviceName=service&security=tls";
     var config = ServerProbe.BuildCoreConfig(LinkParser.Parse(vless, 32000, 32001), 32000, 32002);
     Check(config["routing"]!["rules"]!.AsArray().Count == 1 && config["outbounds"]![0]!["streamSettings"]!["grpcSettings"]!["serviceName"]!.ToString() == "service", "grpc-and-no-direct-bypass");
+    const string vlessHttpUpgrade = "vless://00000000-0000-4000-8000-000000000001@example.com:443?type=httpupgrade&path=%2Fws&host=cdn.example.com&security=tls";
+    var httpUpgradeCfg = ServerProbe.BuildCoreConfig(LinkParser.Parse(vlessHttpUpgrade, 32000, 32001), 32000, 32002);
+    Check(httpUpgradeCfg["outbounds"]![0]!["streamSettings"]!["httpupgradeSettings"]!["path"]!.ToString() == "/ws" &&
+          httpUpgradeCfg["outbounds"]![0]!["streamSettings"]!["httpupgradeSettings"]!["host"]!.ToString() == "cdn.example.com", "httpupgrade-transport");
     var mieru = ServerProbe.BuildCoreConfig(LinkParser.Parse("mieru://user:password@example.com:443?transport=UDP"), 32000, 32002);
     Check(mieru["rpcPort"]!.GetValue<int>() == 32002 && mieru["profiles"]![0]!["servers"]![0]!["portBindings"]![0]!["protocol"]!.ToString() == "UDP", "mieru-own-core-and-udp");
     var hysteria = ServerProbe.BuildCoreConfig(LinkParser.Parse("hy2://password@example.com:443?sni=tls.example&obfs=salamander&obfs-password=secret"), 32000, 32002);
@@ -74,7 +78,7 @@ static async Task<int> RunProbeTests()
     Check(ExternalSources.Interleave(new[] { new List<string> { vless + "#a", "hy2://one" }, new List<string> { vless + "#b", "vmess://two" } }).SequenceEqual(new[] { vless + "#a", "hy2://one", "vmess://two" }), "source-interleave-dedup");
     var probe = new ServerProbe(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()), Path.GetTempPath());
     Check((await probe.CheckAsync(vless)).Status == ProbeStatus.MissingEngine && !(new ServerProbeResult(ProbeStatus.EngineStartFailed)).IsUsable, "local-errors-not-dead-servers");
-    Console.WriteLine("Probe/source tests: 10/10 passed");
+    Console.WriteLine("Probe/source tests: 11/11 passed");
     return 0;
 }
 

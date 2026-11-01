@@ -92,6 +92,12 @@ function handleHostMessage(msg) {
         case 'updateExternalStatus':
             document.getElementById('external-status').innerText = msg.statusText;
             break;
+        case 'updateExternalScanning':
+            const cancelBtn = document.getElementById('btn-cancel-external');
+            if (cancelBtn) {
+                cancelBtn.classList.toggle('hidden', !msg.scanning);
+            }
+            break;
         case 'addLog':
             appendLogLine(msg.log);
             break;
@@ -161,6 +167,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Refresh buttons
     document.getElementById('btn-refresh-pings').addEventListener('click', () => sendToHost('checkAllPings'));
     document.getElementById('btn-refresh-external').addEventListener('click', () => requestExternalRefresh(true));
+    const cancelExternalBtn = document.getElementById('btn-cancel-external');
+    if (cancelExternalBtn) {
+        cancelExternalBtn.addEventListener('click', () => sendToHost('cancelExternal'));
+    }
 
     // Copy logs
     document.getElementById('btn-copy-logs').addEventListener('click', () => {
@@ -204,7 +214,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('chk-bypass-lan').addEventListener('change', (e) => {
         sendToHost('saveSetting', { name: 'bypassLan', value: e.target.checked });
     });
-    document.getElementById('btn-split-tunnel').addEventListener('click', () => {
+    document.getElementById('btn-split-tunnel').addEventListener('click', (e) => {
+        if (e.target.closest('.toggle-switch')) return;
         const chk = document.getElementById('chk-bypass-lan');
         chk.checked = !chk.checked;
         sendToHost('saveSetting', { name: 'bypassLan', value: chk.checked });
@@ -535,6 +546,7 @@ function renderExternalConfigs() {
 function createServerCard(link, isSelected, ping, loading, showDelete = true, verificationStatus = '') {
     const card = document.createElement('div');
     card.className = 'server-card' + (isSelected ? ' selected' : '');
+    card.dataset.link = link;
     
     let startX = 0;
     let startY = 0;
@@ -672,8 +684,47 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
 }
 
 function updateServerPingBadge(link, latency, loading) {
-    // Re-render server list to update badges cleanly
-    renderServersList();
+    const list = document.getElementById('servers-list');
+    if (!list) return;
+    const card = Array.from(list.querySelectorAll('.server-card')).find(el => el.dataset.link === link);
+    if (!card) {
+        renderServersList();
+        return;
+    }
+    const verificationStatus = appState.verificationStatuses[link] || '';
+    const metaSpan = card.querySelector('.server-meta');
+    if (metaSpan) {
+        metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' · ' + verificationStatus : ' · Не проверен');
+    }
+    const pingArea = card.querySelector('.server-ping-area');
+    if (!pingArea) return;
+    pingArea.innerHTML = '';
+    if (loading) {
+        const spinner = document.createElement('div');
+        spinner.className = 'ping-loading-spinner';
+        pingArea.appendChild(spinner);
+    } else if (latency !== undefined && latency !== null) {
+        const badge = document.createElement('span');
+        if (latency < 0) {
+            badge.className = 'ping-badge high';
+            badge.innerText = 'Нет подтверждения';
+        } else {
+            badge.className = 'ping-badge' + (latency > 300 ? ' high' : (latency > 150 ? ' medium' : ''));
+            badge.innerText = `HTTPS ${latency} ms`;
+            if (verificationStatus === 'Частичная доступность') badge.className = 'ping-badge medium';
+        }
+        pingArea.appendChild(badge);
+    } else {
+        const pingBtn = document.createElement('span');
+        pingBtn.className = 'text-link-btn';
+        pingBtn.style.fontSize = '11px';
+        pingBtn.innerText = 'Проверить';
+        pingBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            sendToHost('checkServerPing', { link });
+        });
+        pingArea.appendChild(pingBtn);
+    }
 }
 
 // --- LOGS MANAGEMENT ---

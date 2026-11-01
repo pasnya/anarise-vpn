@@ -325,16 +325,16 @@ namespace Anarise
             // Handle common malformed JSON
             jsonStr = jsonStr.Replace("\"tls\",", "\"tls\":\"tls\",");
             var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
-            var v = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr, options);
+            var v = JsonSerializer.Deserialize<Dictionary<string, object>>(jsonStr, options) ?? new Dictionary<string, object>();
 
-            string add = v.ContainsKey("add") ? v["add"]?.ToString() : "";
+            string add = v.ContainsKey("add") ? v["add"]?.ToString() ?? "" : "";
             int port = v.ContainsKey("port") ? Convert.ToInt32(v["port"]?.ToString()) : 443;
-            string id = v.ContainsKey("id") ? v["id"]?.ToString() : "";
-            string net = v.ContainsKey("net") ? v["net"]?.ToString() : "tcp";
-            string path = v.ContainsKey("path") ? v["path"]?.ToString() : "";
-            string tls = v.ContainsKey("tls") ? v["tls"]?.ToString() : "";
-            string type = v.ContainsKey("type") ? v["type"]?.ToString() : "";
-            string sni = v.ContainsKey("sni") ? v["sni"]?.ToString() : "";
+            string id = v.ContainsKey("id") ? v["id"]?.ToString() ?? "" : "";
+            string net = v.ContainsKey("net") ? v["net"]?.ToString() ?? "tcp" : "tcp";
+            string path = v.ContainsKey("path") ? v["path"]?.ToString() ?? "" : "";
+            string tls = v.ContainsKey("tls") ? v["tls"]?.ToString() ?? "" : "";
+            string type = v.ContainsKey("type") ? v["type"]?.ToString() ?? "" : "";
+            string sni = v.ContainsKey("sni") ? v["sni"]?.ToString() ?? "" : "";
 
             string security = (!string.IsNullOrEmpty(tls) && tls != "none") ? "tls" : "none";
 
@@ -350,7 +350,8 @@ namespace Anarise
                 path: path,
                 headerType: type,
                 fingerprint: "chrome",
-                requestHost: v.ContainsKey("host") ? v["host"]?.ToString() ?? "" : "",
+                requestHost: v != null && v.ContainsKey("host") ? v["host"]?.ToString() ?? "" : "",
+                serviceName: v != null && v.ContainsKey("path") ? v["path"]?.ToString() ?? "" : "",
                 socksPort: socksPort,
                 httpPort: httpPort
             );
@@ -417,6 +418,7 @@ namespace Anarise
             string extra = "",
             string alpn = "",
             bool allowInsecure = false,
+            string serviceName = "",
             int socksPort = 20808,
             int httpPort = 20809)
         {
@@ -607,11 +609,21 @@ namespace Anarise
             }
             else if (network == "grpc")
             {
+                string resolvedServiceName = !string.IsNullOrEmpty(serviceName) ? serviceName : path;
                 streamSettings["grpcSettings"] = new JsonObject
                 {
-                    ["serviceName"] = path.TrimStart('/'),
+                    ["serviceName"] = resolvedServiceName.TrimStart('/'),
                     ["multiMode"] = string.Equals(mode, "multi", StringComparison.OrdinalIgnoreCase)
                 };
+            }
+            else if (network == "httpupgrade")
+            {
+                var httpupgradeSettings = new JsonObject { ["path"] = path };
+                if (!string.IsNullOrEmpty(requestHost))
+                {
+                    httpupgradeSettings["host"] = requestHost;
+                }
+                streamSettings["httpupgradeSettings"] = httpupgradeSettings;
             }
 
             proxyOutbound["streamSettings"] = streamSettings;

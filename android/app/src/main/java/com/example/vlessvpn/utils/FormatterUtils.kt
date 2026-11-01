@@ -47,6 +47,16 @@ object FormatterUtils {
      */
     fun getDisplayLabel(link: String): String {
         try {
+            if (link.startsWith("vmess://", ignoreCase = true)) {
+                val raw = link.substring(8).substringBefore('#').trim().replace('-', '+').replace('_', '/')
+                val padded = raw.padEnd((raw.length + 3) / 4 * 4, '=')
+                val decoded = String(android.util.Base64.decode(padded, android.util.Base64.DEFAULT), Charsets.UTF_8)
+                val json = org.json.JSONObject(decoded)
+                val ps = json.optString("ps")
+                if (ps.isNotBlank()) return ps
+                val add = json.optString("add")
+                if (add.isNotBlank()) return add
+            }
             val hashIndex = link.lastIndexOf('#')
             if (hashIndex != -1 && hashIndex < link.length - 1) {
                 val rawFragment = link.substring(hashIndex + 1)

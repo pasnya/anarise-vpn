@@ -21,7 +21,7 @@ val releaseSigningConfigured = listOf(
 android {
     namespace = "com.example.vlessvpn"
     sourceSets.getByName("main").assets.srcDir("../../shared")
-    compileSdk = 36
+    compileSdk = (project.findProperty("compileSdkOverride") as? String)?.toIntOrNull() ?: 36
 
     lint {
         checkReleaseBuilds = true

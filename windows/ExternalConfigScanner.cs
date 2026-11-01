@@ -16,7 +16,8 @@ public static class ExternalConfigScanner
         Action<int>? onTrafficProgress = null,
         int configBatchSize = 200,
         int trafficBatchSize = 30,
-        Action<ExternalScanCandidate>? onVerified = null)
+        Action<ExternalScanCandidate>? onVerified = null,
+        System.Threading.CancellationToken cancellationToken = default)
     {
         if (configBatchSize <= 0 || trafficBatchSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(configBatchSize), "Batch sizes must be positive.");
@@ -30,14 +31,16 @@ public static class ExternalConfigScanner
 
         for (int offset = 0; offset < links.Count; offset += configBatchSize)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var reachable = new List<ExternalScanCandidate>();
             onPingProgress?.Invoke(checkedConfigs);
             var batch = links.Skip(offset).Take(configBatchSize);
             await Task.WhenAll(batch.Select(async link =>
             {
-                await pingSlots.WaitAsync();
+                await pingSlots.WaitAsync(cancellationToken);
                 try
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     long latency = await measurePing(link);
                     // TCP is a ranking hint, never proof that a UDP/REALITY
                     // configuration is unusable. Failed hints are checked last.
@@ -51,13 +54,15 @@ public static class ExternalConfigScanner
             var candidates = reachable.OrderBy(c => c.Latency < 0 ? long.MaxValue : c.Latency).ToList();
             for (int trafficOffset = 0; trafficOffset < candidates.Count; trafficOffset += trafficBatchSize)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 onTrafficProgress?.Invoke(trafficChecks);
                 var trafficBatch = candidates.Skip(trafficOffset).Take(trafficBatchSize);
                 await Task.WhenAll(trafficBatch.Select(async candidate =>
                 {
-                    await trafficSlots.WaitAsync();
+                    await trafficSlots.WaitAsync(cancellationToken);
                     try
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
                         var result = await verifyTraffic(candidate.Link);
                         if (result.IsUsable)
                         {

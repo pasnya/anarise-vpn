@@ -72,10 +72,15 @@ class VyomVpnService : TProxyService() {
 
             val config = VyomVpnManager.getLastConfig(this@VyomVpnService) ?: return
 
-            VyomLogger.i(this@VyomVpnService, "Network changed → restarting Xray")
+            VyomLogger.i(this@VyomVpnService, "Network changed → restarting VPN engine")
 
-            NativeEngine.stopXray()
-            NativeEngine.startXray(config, filesDir.absolutePath)
+            when {
+                LinkParser.isMieruConfig(config) || LinkParser.isHysteria2Config(config) -> startVpn(config)
+                else -> {
+                    NativeEngine.stopXray()
+                    NativeEngine.startXray(config, filesDir.absolutePath)
+                }
+            }
         }
 
         override fun onLost(network: Network) {
@@ -175,17 +180,7 @@ class VyomVpnService : TProxyService() {
                     .addDisallowedApplication(packageName)
                     .setMtu(1350)
 
-                if (resolvedAddresses.isEmpty()) {
-                    try {
-                        if (serverHost.contains(":")) {
-                            builder.addRoute(serverHost, 128)
-                        } else {
-                            builder.addRoute(serverHost, 32)
-                        }
-                    } catch (e: Exception) {
-                        VyomLogger.e(this, "Failed to add route for server fallback: $serverHost", e)
-                    }
-                } else {
+                if (resolvedAddresses.isNotEmpty()) {
                     for (ip in resolvedAddresses) {
                         try {
                             if (ip.contains(":")) {
@@ -311,17 +306,7 @@ class VyomVpnService : TProxyService() {
                     .addDisallowedApplication(packageName)
                     .setMtu(1350)
 
-                if (resolvedAddresses.isEmpty()) {
-                    try {
-                        if (serverHost.contains(":")) {
-                            builder.addRoute(serverHost, 128)
-                        } else {
-                            builder.addRoute(serverHost, 32)
-                        }
-                    } catch (e: Exception) {
-                        VyomLogger.e(this, "Failed to add route for server fallback: $serverHost", e)
-                    }
-                } else {
+                if (resolvedAddresses.isNotEmpty()) {
                     for (ip in resolvedAddresses) {
                         try {
                             if (ip.contains(":")) {
@@ -395,7 +380,7 @@ class VyomVpnService : TProxyService() {
                 Thread.sleep(500)
 
                 NativeEngine.initNative(this)
-                val serverIp = extractServerIp(xrayConfig) ?: "78.129.150.59"
+                val serverIp = extractServerIp(xrayConfig)
 
                 val result = NativeEngine.startXray(xrayConfig, assetPath)
                 VyomLogger.i(this, "Xray started: $result")
@@ -408,12 +393,14 @@ class VyomVpnService : TProxyService() {
                 }
 
                 // Resolve DNS/domain name of the server to IP address(es) to avoid IllegalArgumentException in addRoute
-                val resolvedAddresses = try {
-                    java.net.InetAddress.getAllByName(serverIp).map { it.hostAddress }
-                } catch (e: Exception) {
-                    VyomLogger.e(this, "Failed to resolve server IP for $serverIp", e)
-                    emptyList<String>()
-                }
+                val resolvedAddresses = if (!serverIp.isNullOrBlank()) {
+                    try {
+                        java.net.InetAddress.getAllByName(serverIp).map { it.hostAddress }
+                    } catch (e: Exception) {
+                        VyomLogger.e(this, "Failed to resolve server IP for $serverIp", e)
+                        emptyList<String>()
+                    }
+                } else emptyList()
 
                 val builder = Builder()
                     .setSession(sessionName)
@@ -423,18 +410,7 @@ class VyomVpnService : TProxyService() {
                     .addDisallowedApplication(packageName)
                     .setMtu(1350)
 
-                if (resolvedAddresses.isEmpty()) {
-                    // Fallback to original serverIp if DNS lookup failed entirely
-                    try {
-                        if (serverIp.contains(":")) {
-                            builder.addRoute(serverIp, 128)
-                        } else {
-                            builder.addRoute(serverIp, 32)
-                        }
-                    } catch (e: Exception) {
-                        VyomLogger.e(this, "Failed to add route for serverIp fallback: $serverIp", e)
-                    }
-                } else {
+                if (resolvedAddresses.isNotEmpty()) {
                     for (ip in resolvedAddresses) {
                         try {
                             if (ip.contains(":")) {
@@ -580,6 +556,7 @@ class VyomVpnService : TProxyService() {
         val notificationBuilder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, NOTIFICATION_CHANNEL_ID)
         } else {
+            @Suppress("DEPRECATION")
             Notification.Builder(this)
         }
 
@@ -650,12 +627,12 @@ class VyomVpnService : TProxyService() {
 
             // Mieru config
             if (obj.optString("_protocol") == LinkParser.PROTOCOL_MIERU) {
-                return obj.optString("server_host", null)
+                return obj.optString("server_host").takeIf { it.isNotEmpty() }
             }
 
             // Hysteria2 config
             if (obj.optString("_protocol") == LinkParser.PROTOCOL_HYSTERIA2) {
-                return obj.optString("server_host", null)
+                return obj.optString("server_host").takeIf { it.isNotEmpty() }
             }
 
             // Xray config

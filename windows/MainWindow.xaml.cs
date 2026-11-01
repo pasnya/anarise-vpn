@@ -20,21 +20,19 @@ namespace Anarise
 {
     public partial class MainWindow : Window
     {
-        private Process coreProcess = null;
+        private Process? coreProcess = null;
         private readonly CoreProcessManager coreProcessManager = new();
         private bool isConnected = false;
         private string currentConfigLink = "";
         private List<string> configHistory = new List<string>();
         
         // Timer for connection stats
-        private System.Windows.Threading.DispatcherTimer statsTimer;
+        private System.Windows.Threading.DispatcherTimer? statsTimer;
         private DateTime connectionStartTime;
         private double totalUploadBytes = 0;
         private double totalDownloadBytes = 0;
         private double currentUploadSpeed = 0;
         private double currentDownloadSpeed = 0;
-        private long lastTunBytesSent = 0;
-        private long lastTunBytesReceived = 0;
 
         // Settings
         private bool killSwitch = false;
@@ -55,17 +53,19 @@ namespace Anarise
         private const int ExternalConfigBatchSize = 200;
         private const int ExternalTrafficBatchSize = 30;
         private bool externalScanInProgress;
-        private Task binariesSetupTask;
+        private CancellationTokenSource? externalScanCts;
+        private Task? binariesSetupTask;
         private NetworkStateGuard networkStateGuard;
-        private CancellationTokenSource reconnectCts;
+        private CancellationTokenSource? reconnectCts;
         private int reconnectAttempts;
         private bool reconnectInProgress;
         private readonly StatisticsService statisticsService = new();
 
         // TUN tunnel process
-        private Process tun2socksProcess = null;
-        private string savedDefaultGateway = null;
-        private string savedServerIp = null;
+        private Process? tun2socksProcess = null;
+        private string? savedDefaultGateway = null;
+        private string? savedServerIp = null;
+        private string? activePhysicalInterfaceName = null;
         private int connectionGeneration = 0;
 
         // Path variables
@@ -105,6 +105,7 @@ namespace Anarise
             // Remove stale rules left behind by an interrupted previous session.
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
+            SystemProxyManager.SetKillSwitchBlocked(false);
 
             LoadSettings();
             LoadHistory();
@@ -122,6 +123,7 @@ namespace Anarise
                 SystemProxyManager.SetChromiumQuicAllowed(true);
                 SystemProxyManager.SetBrowserQuicBlocked(false);
                 SystemProxyManager.SetIpv6Blocked(false);
+                SystemProxyManager.SetKillSwitchBlocked(false);
             };
         }
 
@@ -173,20 +175,20 @@ namespace Anarise
             }
         }
 
-        private async void OnWebViewMessageReceived(object sender, CoreWebView2WebMessageReceivedEventArgs e)
+        private async void OnWebViewMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
             try
             {
                 var json = e.WebMessageAsJson;
                 var node = JsonNode.Parse(json);
-                string action = node["action"]?.ToString();
+                string? action = node?["action"]?.ToString();
 
                 if (string.IsNullOrEmpty(action)) return;
 
                 switch (action)
                 {
                     case "appReady":
-                        await SyncSettingsAndHistory();
+                        SyncSettingsAndHistory();
                         binariesSetupTask ??= CheckAndDownloadBinaries();
                         await binariesSetupTask;
                         CheckForUpdates();
@@ -197,18 +199,21 @@ namespace Anarise
                         break;
 
                     case "importSubscription":
-                        string subUrl = node["url"]?.ToString();
-                        await ImportSubscription(subUrl);
+                        string? subUrl = node?["url"]?.ToString();
+                        if (!string.IsNullOrEmpty(subUrl))
+                        {
+                            await ImportSubscription(subUrl);
+                        }
                         break;
 
                     case "selectConfig":
-                        currentConfigLink = node["link"]?.ToString() ?? "";
+                        currentConfigLink = node?["link"]?.ToString() ?? "";
                         SaveSettings();
                         PostToUi(new { action = "updateSelectedConfig", link = currentConfigLink });
                         break;
 
                     case "deleteConfig":
-                        string linkToDelete = node["link"]?.ToString();
+                        string? linkToDelete = node?["link"]?.ToString();
                         if (!string.IsNullOrEmpty(linkToDelete))
                         {
                             configHistory.Remove(linkToDelete);
@@ -232,7 +237,7 @@ namespace Anarise
                         break;
 
                     case "checkServerPing":
-                        string linkToPing = node["link"]?.ToString();
+                        string? linkToPing = node?["link"]?.ToString();
                         if (!string.IsNullOrEmpty(linkToPing))
                         {
                             _ = CheckPingAsync(linkToPing);
@@ -247,22 +252,29 @@ namespace Anarise
                         _ = RefreshExternalConfigsAsync();
                         break;
 
+                    case "cancelExternal":
+                        externalScanCts?.Cancel();
+                        break;
+
                     case "saveSetting":
-                        string sName = node["name"]?.ToString();
-                        if (sName == "socksPort" || sName == "httpPort")
+                        string? sName = node?["name"]?.ToString();
+                        if (!string.IsNullOrEmpty(sName))
                         {
-                            int portVal = node["value"]?.AsValue().GetValue<int>() ?? 0;
-                            UpdatePortSetting(sName, portVal);
-                        }
-                        else
-                        {
-                            bool sVal = node["value"]?.AsValue().GetValue<bool>() ?? false;
-                            UpdateSetting(sName, sVal);
+                            if (sName == "socksPort" || sName == "httpPort")
+                            {
+                                int portVal = node?["value"]?.AsValue().GetValue<int>() ?? 0;
+                                UpdatePortSetting(sName, portVal);
+                            }
+                            else
+                            {
+                                bool sVal = node?["value"]?.AsValue().GetValue<bool>() ?? false;
+                                UpdateSetting(sName, sVal);
+                            }
                         }
                         break;
 
                     case "copyToClipboard":
-                        string copyText = node["text"]?.ToString();
+                        string? copyText = node?["text"]?.ToString();
                         if (!string.IsNullOrEmpty(copyText))
                         {
                             Clipboard.SetText(copyText);
@@ -271,7 +283,7 @@ namespace Anarise
                         break;
 
                     case "openBrowser":
-                        string openUrl = node["url"]?.ToString();
+                        string? openUrl = node?["url"]?.ToString();
                         if (!string.IsNullOrEmpty(openUrl))
                         {
                             try
@@ -319,6 +331,7 @@ namespace Anarise
                 StopTun2Socks();
                 CleanupRuntimeConfigFiles();
                 networkStateGuard.Restore();
+                SystemProxyManager.SetKillSwitchBlocked(false);
                 KillOrphanedProcesses();
                 networkStateGuard.Begin();
 
@@ -370,9 +383,9 @@ namespace Anarise
                 {
                     try
                     {
-                        var rawMieruConfig = JsonNode.Parse(parsedConfig).AsObject();
-                        string host = rawMieruConfig["server_host"]?.ToString();
-                        string port = rawMieruConfig["server_port"]?.ToString();
+                        var rawMieruConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                        string? host = rawMieruConfig["server_host"]?.ToString();
+                        string? port = rawMieruConfig["server_port"]?.ToString();
                         
                         if (!string.IsNullOrEmpty(host))
                         {
@@ -395,9 +408,9 @@ namespace Anarise
                 {
                     try
                     {
-                        var rawHysteriaConfig = JsonNode.Parse(parsedConfig).AsObject();
-                        string host = rawHysteriaConfig["server_host"]?.ToString();
-                        string port = rawHysteriaConfig["server_port"]?.ToString();
+                        var rawHysteriaConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                        string? host = rawHysteriaConfig["server_host"]?.ToString();
+                        string? port = rawHysteriaConfig["server_port"]?.ToString();
                         
                         if (!string.IsNullOrEmpty(host))
                         {
@@ -406,7 +419,7 @@ namespace Anarise
                             
                             rawHysteriaConfig["server"] = $"{resolvedIp}:{port}";
                             rawHysteriaConfig["server_host"] = resolvedIp;
-                            if (rawHysteriaConfig["sni"] == null || string.IsNullOrEmpty(rawHysteriaConfig["sni"].ToString()))
+                            if (rawHysteriaConfig["sni"] == null || string.IsNullOrEmpty(rawHysteriaConfig["sni"]!.ToString()))
                             {
                                 rawHysteriaConfig["sni"] = host;
                             }
@@ -424,7 +437,7 @@ namespace Anarise
                 {
                     try
                     {
-                        var xrayConfig = JsonNode.Parse(parsedConfig).AsObject();
+                        var xrayConfig = JsonNode.Parse(parsedConfig)!.AsObject();
                         
                         // Force warning log level in Xray config to save CPU/memory and reduce log spam
                         if (xrayConfig["log"] == null)
@@ -443,29 +456,35 @@ namespace Anarise
                                 if (settings != null)
                                 {
                                     // VLESS/VMess use vnext
-                                    if (settings["vnext"] != null && settings["vnext"]?.AsArray().Count > 0)
+                                    if (settings["vnext"] != null && settings["vnext"]!.AsArray().Count > 0)
                                     {
                                         var vnextObj = settings["vnext"]?[0]?.AsObject();
                                         if (vnextObj != null && vnextObj["address"] != null)
                                         {
-                                            string host = vnextObj["address"]?.ToString();
-                                            string resolvedIp = await ResolveDohAsync(host);
-                                            if (gen != connectionGeneration) return;
-                                            
-                                            vnextObj["address"] = resolvedIp;
+                                            string? host = vnextObj["address"]?.ToString();
+                                            if (!string.IsNullOrEmpty(host))
+                                            {
+                                                string resolvedIp = await ResolveDohAsync(host);
+                                                if (gen != connectionGeneration) return;
+                                                
+                                                vnextObj["address"] = resolvedIp;
+                                            }
                                         }
                                     }
                                     // NaiveProxy/Trojan/Shadowsocks use servers
-                                    else if (settings["servers"] != null && settings["servers"]?.AsArray().Count > 0)
+                                    else if (settings["servers"] != null && settings["servers"]!.AsArray().Count > 0)
                                     {
                                         var serverObj = settings["servers"]?[0]?.AsObject();
                                         if (serverObj != null && serverObj["address"] != null)
                                         {
-                                            string host = serverObj["address"]?.ToString();
-                                            string resolvedIp = await ResolveDohAsync(host);
-                                            if (gen != connectionGeneration) return;
-                                            
-                                            serverObj["address"] = resolvedIp;
+                                            string? host = serverObj["address"]?.ToString();
+                                            if (!string.IsNullOrEmpty(host))
+                                            {
+                                                string resolvedIp = await ResolveDohAsync(host);
+                                                if (gen != connectionGeneration) return;
+                                                
+                                                serverObj["address"] = resolvedIp;
+                                            }
                                         }
                                     }
                                 }
@@ -497,6 +516,7 @@ namespace Anarise
 
                 // Extract server IP for VPN route exclusion
                 savedServerIp = ExtractServerIp(parsedConfig, isHysteria);
+                activePhysicalInterfaceName = FindPhysicalOutboundInterface();
 
                 if (gen != connectionGeneration) return;
 
@@ -508,7 +528,7 @@ namespace Anarise
                 
                 if (isMieru)
                 {
-                    var rawMieruConfig = JsonNode.Parse(parsedConfig).AsObject();
+                    var rawMieruConfig = JsonNode.Parse(parsedConfig)!.AsObject();
                     string host = rawMieruConfig["server_host"]?.ToString() ?? "";
                     bool isIp = IPAddress.TryParse(host, out _);
                     string ipAddressVal = isIp ? host : "";
@@ -556,7 +576,7 @@ namespace Anarise
                 }
                 else if (isHysteria)
                 {
-                    var rawHysteriaConfig = JsonNode.Parse(parsedConfig).AsObject();
+                    var rawHysteriaConfig = JsonNode.Parse(parsedConfig)!.AsObject();
                     
                     var hysteriaConfig = new JsonObject
                     {
@@ -708,8 +728,6 @@ namespace Anarise
                 connectionStartTime = DateTime.Now;
                 totalUploadBytes = 0;
                 totalDownloadBytes = 0;
-                lastTunBytesSent = 0;
-                lastTunBytesReceived = 0;
                 statisticsService.Reset();
 
                 PostToUi(new { action = "updateState", state = "CONNECTED" });
@@ -731,20 +749,25 @@ namespace Anarise
                 SystemProxyManager.SetChromiumQuicAllowed(true);
                 SystemProxyManager.SetBrowserQuicBlocked(false);
                 SystemProxyManager.SetIpv6Blocked(false);
+                SystemProxyManager.SetKillSwitchBlocked(false);
                 LogToUi("Ошибка запуска подключения: " + ex.Message);
                 if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
             }
         }
 
-        private void StopConnection()
+        private void StopConnection(bool preserveKillSwitch = false)
         {
             System.Threading.Interlocked.Increment(ref connectionGeneration);
-            reconnectCts?.Cancel();
-            reconnectInProgress = false;
+            if (!preserveKillSwitch)
+            {
+                reconnectCts?.Cancel();
+                reconnectInProgress = false;
+            }
             PostToUi(new { action = "updateState", state = "DISCONNECTED" });
             LogToUi("Отключение...");
 
             StopStatsTimer();
+            string? lastServerIp = savedServerIp;
             StopTun2Socks();
             StopTunnelCore();
             CleanupRuntimeConfigFiles();
@@ -753,6 +776,18 @@ namespace Anarise
             SystemProxyManager.SetChromiumQuicAllowed(true);
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
+            if (preserveKillSwitch && killSwitch)
+            {
+                bool ksApplied = SystemProxyManager.SetKillSwitchBlocked(true, lastServerIp);
+                if (ksApplied)
+                {
+                    LogToUi("Kill Switch активирован: интернет заблокирован до восстановления VPN.");
+                }
+            }
+            else
+            {
+                SystemProxyManager.SetKillSwitchBlocked(false);
+            }
             LogToUi("Соединение разорвано.");
         }
 
@@ -1177,7 +1212,7 @@ namespace Anarise
             }
         }
 
-        private string GetDefaultGateway()
+        private string? GetDefaultGateway()
         {
             try
             {
@@ -1202,15 +1237,15 @@ namespace Anarise
             return null;
         }
 
-        private string ExtractServerIp(string configJson, bool isHysteria)
+        private string? ExtractServerIp(string configJson, bool isHysteria)
         {
             try
             {
                 var doc = JsonNode.Parse(configJson);
-                var protocol = doc["_protocol"]?.ToString();
+                var protocol = doc?["_protocol"]?.ToString();
                 if (protocol == LinkParser.PROTOCOL_HYSTERIA2 || protocol == LinkParser.PROTOCOL_MIERU)
                 {
-                    string server = doc["server_host"]?.ToString() ?? doc["server"]?.ToString();
+                    string? server = doc?["server_host"]?.ToString() ?? doc?["server"]?.ToString();
                     if (!string.IsNullOrEmpty(server))
                     {
                         // Remove port if present
@@ -1225,11 +1260,11 @@ namespace Anarise
                 else
                 {
                     // Xray config: outbounds[0].settings.vnext[0].address or servers[0].address
-                    var outbounds = doc["outbounds"]?.AsArray();
+                    var outbounds = doc?["outbounds"]?.AsArray();
                     if (outbounds != null && outbounds.Count > 0)
                     {
-                        var settings = outbounds[0]["settings"];
-                        string address = settings?["vnext"]?[0]?["address"]?.ToString()
+                        var settings = outbounds[0]?["settings"];
+                        string? address = settings?["vnext"]?[0]?["address"]?.ToString()
                                        ?? settings?["servers"]?[0]?["address"]?.ToString();
                         if (!string.IsNullOrEmpty(address))
                         {
@@ -1261,27 +1296,33 @@ namespace Anarise
             statsTimer?.Stop();
         }
 
-        private void StatsTimer_Tick(object sender, EventArgs e)
+        private void StatsTimer_Tick(object? sender, EventArgs e)
         {
             if (!isConnected) return;
 
-            if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode || tun2socksProcess != null))
+            if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode && tun2socksProcess != null))
             {
                 LogToUi("VPN-ядро или tun2socks неожиданно завершилось.");
-                StopConnection();
+                StopConnection(preserveKillSwitch: true);
                 ScheduleReconnect();
                 return;
             }
 
             try
             {
-                var tunNic = NetworkInterface.GetAllNetworkInterfaces()
-                    .FirstOrDefault(n => n.Name.Contains("anarise", StringComparison.OrdinalIgnoreCase)
-                                        && n.OperationalStatus == OperationalStatus.Up);
+                var allNics = NetworkInterface.GetAllNetworkInterfaces();
+                var targetNic = allNics.FirstOrDefault(n => n.Name.Contains("anarise", StringComparison.OrdinalIgnoreCase)
+                                    && n.OperationalStatus == OperationalStatus.Up);
 
-                if (tunNic != null)
+                if (targetNic == null && !string.IsNullOrEmpty(activePhysicalInterfaceName))
                 {
-                    var stats = tunNic.GetIPv4Statistics();
+                    targetNic = allNics.FirstOrDefault(n => string.Equals(n.Name, activePhysicalInterfaceName, StringComparison.OrdinalIgnoreCase)
+                                    && n.OperationalStatus == OperationalStatus.Up);
+                }
+
+                if (targetNic != null)
+                {
+                    var stats = targetNic.GetIPv4Statistics();
                     long bytesSent = stats.BytesSent;
                     long bytesReceived = stats.BytesReceived;
 
@@ -1354,10 +1395,10 @@ namespace Anarise
         // --- EXIT IP CHECKER ---
         private async Task FetchExitIpInfoAsync()
         {
-            // Route this call through our local HTTP Proxy to get the exit IP!
+            // Route this call through our local SOCKS5 Proxy so it works for all cores (including Mieru) and dynamic ports!
             var handler = new HttpClientHandler
             {
-                Proxy = new WebProxy("http://127.0.0.1:20809"),
+                Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}"),
                 UseProxy = true
             };
 
@@ -1366,15 +1407,38 @@ namespace Anarise
                 client.Timeout = TimeSpan.FromSeconds(6);
                 try
                 {
+                    string response = await client.GetStringAsync("https://ipwho.is/");
+                    var data = JsonNode.Parse(response);
+                    if (data != null && data["success"]?.GetValue<bool>() != false)
+                    {
+                        var exitIp = new
+                        {
+                            ip = data["ip"]?.ToString() ?? data["query"]?.ToString(),
+                            country = data["country"]?.ToString(),
+                            countryCode = data["country_code"]?.ToString() ?? data["countryCode"]?.ToString(),
+                            city = data["city"]?.ToString()
+                        };
+
+                        PostToUi(new { action = "updateExitIp", exitIp = exitIp });
+                        return;
+                    }
+                }
+                catch
+                {
+                    // Fallback to ip-api if ipwho.is is unreachable
+                }
+
+                try
+                {
                     string response = await client.GetStringAsync("http://ip-api.com/json");
                     var data = JsonNode.Parse(response);
                     
                     var exitIp = new
                     {
-                        ip = data["query"]?.ToString(),
-                        country = data["country"]?.ToString(),
-                        countryCode = data["countryCode"]?.ToString(),
-                        city = data["city"]?.ToString()
+                        ip = data?["query"]?.ToString(),
+                        country = data?["country"]?.ToString(),
+                        countryCode = data?["countryCode"]?.ToString(),
+                        city = data?["city"]?.ToString()
                     };
 
                     PostToUi(new { action = "updateExitIp", exitIp = exitIp });
@@ -1557,8 +1621,12 @@ namespace Anarise
                 return;
             }
             externalScanInProgress = true;
+            externalScanCts?.Cancel();
+            externalScanCts = new CancellationTokenSource();
+            var scanToken = externalScanCts.Token;
             try
             {
+                PostToUi(new { action = "updateExternalScanning", scanning = true });
                 PostToUi(new { action = "updateExternalConfigs", configs = new object[0] });
                 PostToUi(new { action = "updateExternalStatus", statusText = "Подготовка VPN-модулей..." });
                 binariesSetupTask ??= CheckAndDownloadBinaries();
@@ -1589,7 +1657,8 @@ namespace Anarise
                         live.Add(candidate);
                         PostToUi(new { action = "updateExternalConfigs", configs = live.OrderBy(c => c.Latency).Select(c => new
                         { link = c.Link, latency = c.Latency, verificationStatus = new ServerProbeResult(c.Status).Label, verifiedAt = c.VerifiedAt }).ToList() });
-                    });
+                    },
+                    cancellationToken: scanToken);
                 var sortedConfigs = scanResult.WorkingConfigs.Select(c => new
                 { link = c.Link, latency = c.Latency, verificationStatus = new ServerProbeResult(c.Status).Label, verifiedAt = c.VerifiedAt }).ToList();
                 var checkedAt = scanResult.WorkingConfigs.Select(c => c.VerifiedAt ?? DateTimeOffset.UtcNow).DefaultIfEmpty(DateTimeOffset.UtcNow).Min();
@@ -1605,12 +1674,21 @@ namespace Anarise
                     : "Рабочий HTTPS-трафик не подтверждён";
                 PostToUi(new { action = "updateExternalStatus", statusText = status + $" (проверено: {scanResult.TrafficChecks}/{uniqueLinks.Count}; источников: {loaded.LoadedSources}/{sources.Count})" });
             }
+            catch (OperationCanceledException)
+            {
+                LogToUi("Проверка внешних списков остановлена пользователем.");
+                PostToUi(new { action = "updateExternalStatus", statusText = "Проверка остановлена пользователем." });
+            }
             catch (Exception ex)
             {
                 LogToUi("Проверка внешних списков: " + ex.GetType().Name);
                 PostToUi(new { action = "updateExternalStatus", statusText = "Ошибка проверки внешних списков. Подробности в логах." });
             }
-            finally { externalScanInProgress = false; }
+            finally
+            {
+                externalScanInProgress = false;
+                PostToUi(new { action = "updateExternalScanning", scanning = false });
+            }
         }
         private static async Task<string> GetBoundedTextAsync(HttpClient client, string url)
         {
@@ -2086,16 +2164,18 @@ namespace Anarise
                 try
                 {
                     var settings = JsonSerializer.Deserialize<Dictionary<string, object>>(json);
-                    
-                    if (settings.TryGetValue("currentConfigLink", out var valLink)) currentConfigLink = valLink?.ToString() ?? "";
-                    if (settings.TryGetValue("killSwitch", out var valKs)) killSwitch = Convert.ToBoolean(valKs.ToString());
-                    if (settings.TryGetValue("autostart", out var valAs)) autostart = Convert.ToBoolean(valAs.ToString());
-                    if (settings.TryGetValue("autoreconnect", out var valAr)) autoreconnect = Convert.ToBoolean(valAr.ToString());
-                    if (settings.TryGetValue("bypassLan", out var valBl)) bypassLan = Convert.ToBoolean(valBl.ToString());
-                    if (settings.TryGetValue("socksPort", out var valSp)) socksPort = Convert.ToInt32(valSp.ToString());
-                    if (settings.TryGetValue("httpPort", out var valHp)) httpPort = Convert.ToInt32(valHp.ToString());
-                    if (settings.TryGetValue("vpnMode", out var valVm)) vpnMode = Convert.ToBoolean(valVm.ToString());
-                    if (settings.TryGetValue("systemProxy", out var valSp2)) systemProxy = Convert.ToBoolean(valSp2.ToString());
+                    if (settings != null)
+                    {
+                        if (settings.TryGetValue("currentConfigLink", out var valLink)) currentConfigLink = valLink?.ToString() ?? "";
+                        if (settings.TryGetValue("killSwitch", out var valKs) && valKs != null) killSwitch = Convert.ToBoolean(valKs.ToString());
+                        if (settings.TryGetValue("autostart", out var valAs) && valAs != null) autostart = Convert.ToBoolean(valAs.ToString());
+                        if (settings.TryGetValue("autoreconnect", out var valAr) && valAr != null) autoreconnect = Convert.ToBoolean(valAr.ToString());
+                        if (settings.TryGetValue("bypassLan", out var valBl) && valBl != null) bypassLan = Convert.ToBoolean(valBl.ToString());
+                        if (settings.TryGetValue("socksPort", out var valSp) && valSp != null) socksPort = Convert.ToInt32(valSp.ToString());
+                        if (settings.TryGetValue("httpPort", out var valHp) && valHp != null) httpPort = Convert.ToInt32(valHp.ToString());
+                        if (settings.TryGetValue("vpnMode", out var valVm) && valVm != null) vpnMode = Convert.ToBoolean(valVm.ToString());
+                        if (settings.TryGetValue("systemProxy", out var valSp2) && valSp2 != null) systemProxy = Convert.ToBoolean(valSp2.ToString());
+                    }
                 }
                 catch { }
             }
@@ -2155,7 +2235,7 @@ namespace Anarise
             }
         }
 
-        private async Task SyncSettingsAndHistory()
+        private void SyncSettingsAndHistory()
         {
             var settingsObj = new
             {
@@ -2198,6 +2278,10 @@ namespace Anarise
             {
                 case "killSwitch":
                     killSwitch = val;
+                    if (!val)
+                    {
+                        SystemProxyManager.SetKillSwitchBlocked(false);
+                    }
                     break;
                 case "autostart":
                     autostart = val;
@@ -2249,14 +2333,17 @@ namespace Anarise
         {
             try
             {
-                using (RegistryKey rk = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
+                using (RegistryKey? rk = Registry.CurrentUser.OpenSubKey(@"SOFTWARE\Microsoft\Windows\CurrentVersion\Run", true))
                 {
                     if (rk != null)
                     {
                         if (enable)
                         {
-                            string exePath = Process.GetCurrentProcess().MainModule.FileName;
-                            rk.SetValue("AnariseVPN", $"\"{exePath}\"");
+                            string? exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                            if (!string.IsNullOrEmpty(exePath))
+                            {
+                                rk.SetValue("AnariseVPN", $"\"{exePath}\"");
+                            }
                         }
                         else
                         {

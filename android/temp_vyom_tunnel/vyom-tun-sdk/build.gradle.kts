@@ -4,7 +4,7 @@ plugins {
 
 android {
     namespace = "io.github.vyomtunnel.sdk"
-    compileSdk = 36
+    compileSdk = (project.findProperty("compileSdkOverride") as? String)?.toIntOrNull() ?: 36
     ndkVersion = "28.2.13676358"
 
     defaultConfig {
@@ -15,10 +15,12 @@ android {
         }
     }
 
-    externalNativeBuild {
-        cmake {
-            path = file("src/main/cpp/CMakeLists.txt")
-            version = "3.22.1"
+    if (project.findProperty("skipNativeBuild") != "true") {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
         }
     }
 

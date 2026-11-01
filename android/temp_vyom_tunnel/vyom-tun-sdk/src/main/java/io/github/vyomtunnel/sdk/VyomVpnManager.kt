@@ -42,7 +42,7 @@ object VyomVpnManager {
 
     private var isInitialized = false
     private var internalReceiver: BroadcastReceiver? = null
-    private var vpnListener: VyomListener? = null
+    private val vpnListeners = java.util.concurrent.CopyOnWriteArraySet<VyomListener>()
     private var notificationConfig = VyomNotificationConfig()
     private val excludedApps = mutableSetOf<String>()
     private const val KEY_KILL_SWITCH = "kill_switch_enabled"
@@ -334,7 +334,7 @@ object VyomVpnManager {
     // --- LISTENERS & IPC (Inter-Process Communication) ---
 
     fun registerListener(context: Context, listener: VyomListener) {
-        this.vpnListener = listener
+        this.vpnListeners.add(listener)
         if (internalReceiver != null) return
 
         internalReceiver = object : BroadcastReceiver() {
@@ -343,16 +343,16 @@ object VyomVpnManager {
                     ACTION_VPN_STATE -> {
                         val stateName = intent.getStringExtra("STATE") ?: return
                         currentState = VyomState.valueOf(stateName)
-                        vpnListener?.onStateChanged(currentState)
+                        vpnListeners.forEach { it.onStateChanged(currentState) }
                     }
                     ACTION_VPN_TRAFFIC -> {
                         val up = intent.getLongExtra("UP", 0L)
                         val down = intent.getLongExtra("DOWN", 0L)
-                        vpnListener?.onTrafficUpdate(up, down)
+                        vpnListeners.forEach { it.onTrafficUpdate(up, down) }
                     }
                     ACTION_SDK_LOGS -> {
                         val msg = intent.getStringExtra("MSG") ?: ""
-                        vpnListener?.onLogReceived(msg)
+                        vpnListeners.forEach { it.onLogReceived(msg) }
                     }
                 }
             }
@@ -365,8 +365,9 @@ object VyomVpnManager {
         }
 
         val senderPermission = "${context.packageName}.permission.INTERNAL_VPN_EVENTS"
+        val appContext = context.applicationContext
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.registerReceiver(
+            appContext.registerReceiver(
                 internalReceiver,
                 filter,
                 senderPermission,
@@ -374,16 +375,22 @@ object VyomVpnManager {
                 Context.RECEIVER_NOT_EXPORTED
             )
         } else {
-            context.registerReceiver(internalReceiver, filter, senderPermission, null)
+            appContext.registerReceiver(internalReceiver, filter, senderPermission, null)
         }
     }
 
-    fun unregisterListener(context: Context) {
-        internalReceiver?.let {
-            context.unregisterReceiver(it)
-            internalReceiver = null
+    fun unregisterListener(context: Context, listener: VyomListener? = null) {
+        if (listener != null) {
+            vpnListeners.remove(listener)
+        } else {
+            vpnListeners.clear()
         }
-        vpnListener = null
+        if (vpnListeners.isEmpty()) {
+            internalReceiver?.let {
+                runCatching { context.applicationContext.unregisterReceiver(it) }
+                internalReceiver = null
+            }
+        }
     }
 
     // --- APP SELECTION (SPLIT TUNNELING) ---

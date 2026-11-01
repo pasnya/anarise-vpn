@@ -133,7 +133,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     override fun onCleared() {
         super.onCleared()
-        VyomVpnManager.unregisterListener(getApplication())
+        VyomVpnManager.unregisterListener(getApplication(), listener)
         stopTimer()
     }
 
@@ -376,6 +376,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _externalStatusText = MutableStateFlow("")
     val externalStatusText: StateFlow<String> = _externalStatusText.asStateFlow()
 
+    private var externalScanJob: kotlinx.coroutines.Job? = null
+
+    fun cancelExternalScan() {
+        externalScanJob?.cancel()
+        externalScanJob = null
+        _externalLoading.value = false
+        _externalStatusText.value = "Проверка остановлена пользователем."
+    }
+
     fun fetchAndCheckExternalConfigs() {
         if (_externalLoading.value) return
         if (_vpnState.value == VyomState.CONNECTED || _vpnState.value == VyomState.CONNECTING) {
@@ -386,7 +395,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _externalLoading.value = true
         _externalConfigs.value = emptyList()
         _externalStatusText.value = "Загрузка свежих списков GitHub..."
-        viewModelScope.launch {
+        externalScanJob = viewModelScope.launch {
             try {
                 val sources = ExternalSources.load(getApplication())
                 val sourceLists = coroutineScope {

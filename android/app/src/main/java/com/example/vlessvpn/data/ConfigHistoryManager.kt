@@ -24,6 +24,16 @@ object ConfigHistoryManager {
                 return "$protocol:${host.lowercase()}:$port"
             }
 
+            if (trimmed.startsWith("vmess://")) {
+                val parsed = io.github.vyomtunnel.sdk.utils.LinkParser.parse(trimmed)
+                val obj = org.json.JSONObject(parsed)
+                val vnext = obj.getJSONArray("outbounds").getJSONObject(0)
+                    .getJSONObject("settings").getJSONArray("vnext").getJSONObject(0)
+                val host = vnext.getString("address")
+                val port = vnext.getInt("port")
+                return "vmess:${host.lowercase()}:$port"
+            }
+
             val normalizedLink = if (trimmed.startsWith("hy2://")) {
                 "hysteria2://" + trimmed.substring(6)
             } else {

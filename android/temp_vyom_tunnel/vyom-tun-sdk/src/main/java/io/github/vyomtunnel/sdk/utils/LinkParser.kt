@@ -201,6 +201,7 @@ object LinkParser {
             requestHost = params["host"].orEmpty(),
             mode = params["mode"] ?: "auto",
             extra = params["extra"].orEmpty(),
+            alpn = params["alpn"].orEmpty(),
             serviceName = params["serviceName"].orEmpty(),
             allowInsecure = params["allowInsecure"] == "1" || params["insecure"] == "1"
         )
@@ -278,6 +279,7 @@ object LinkParser {
         requestHost: String = "",
         mode: String = "auto",
         extra: String = "",
+        alpn: String = "",
         allowInsecure: Boolean = false,
         serviceName: String = ""
     ): String {
@@ -376,7 +378,14 @@ object LinkParser {
                         if (allowInsecure) {
                             put("allowInsecure", true)
                         }
-                        if (protocol == "http") {
+                        if (fingerprint.isNotEmpty()) {
+                            put("fingerprint", fingerprint)
+                        }
+                        if (alpn.isNotBlank()) {
+                            put("alpn", JSONArray().apply {
+                                alpn.split(",").map { it.trim() }.filter { it.isNotEmpty() }.forEach { put(it) }
+                            })
+                        } else if (protocol == "http") {
                             put("alpn", JSONArray().apply {
                                 put("h2")
                                 put("http/1.1")

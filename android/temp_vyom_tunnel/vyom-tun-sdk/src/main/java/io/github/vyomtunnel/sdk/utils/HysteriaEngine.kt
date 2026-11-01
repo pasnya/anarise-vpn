@@ -185,7 +185,7 @@ object HysteriaEngine {
             val proc = process ?: return "unknown"
             // Android API 26+ has pid()
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
-                proc.javaClass.getMethod("pid").invoke(proc).toString()
+                proc.javaClass.getMethod("pid").invoke(proc)?.toString() ?: "unknown"
             } else {
                 val f = proc.javaClass.getDeclaredField("pid")
                 f.isAccessible = true

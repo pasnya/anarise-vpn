@@ -29,6 +29,7 @@ internal sealed class NetworkStateGuard
             SystemProxyManager.SetChromiumQuicAllowed(true);
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
+            SystemProxyManager.SetKillSwitchBlocked(false);
         }
     }
 
