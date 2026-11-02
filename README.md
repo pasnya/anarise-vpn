@@ -95,7 +95,7 @@ cd macos
 # Сборка для Intel Mac:
 ./build-macos.sh osx-x64
 `
-Результат сборки упаковывается в готовый бандл приложения: macos/Anarise.app.
+Результат сборки упаковывается в готовый бандл приложения macos/Anarise.app и образ установщика с ярлыком Applications: macos/AnariseVPN-macOS-<arch>.dmg.
 
 ---
 
