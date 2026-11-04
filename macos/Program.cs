@@ -27,9 +27,11 @@ public static class Program
     [STAThread]
     public static void Main(string[] args)
     {
+        string appDir = AppDomain.CurrentDomain.BaseDirectory;
+        try { Directory.SetCurrentDirectory(appDir); } catch { }
+
         MacNetworkStateGuard.RecoverPreviousSessionIfNeeded();
 
-        string appDir = AppDomain.CurrentDomain.BaseDirectory;
         string wwwroot = Path.Combine(appDir, "wwwroot");
 
         window = new PhotinoWindow()

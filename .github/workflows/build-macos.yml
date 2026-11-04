@@ -26,18 +26,19 @@ jobs:
       with:
         dotnet-version: '8.0.x'
 
-    - name: Build and Package macOS arm64 (DMG and ZIP)
+    - name: Build and Package macOS arm64 (Apple Silicon - DMG and ZIP)
       run: |
         tag="${{ inputs.tag }}"
         if [ -z "$tag" ]; then
           tag="$GITHUB_REF_NAME"
         fi
+        sed -i '' 's/\r$//' macos/build-macos.sh
         chmod +x macos/build-macos.sh
         ./macos/build-macos.sh osx-arm64
         cp "macos/AnariseVPN-macOS-osx-arm64.dmg" "AnariseVPN-macOS-arm64-$tag.dmg"
-        zip -r "AnariseVPN-macOS-arm64-$tag.zip" macos/Anarise.app
+        ditto -c -k --sequesterRsrc --keepParent macos/Anarise.app "AnariseVPN-macOS-arm64-$tag.zip"
 
-    - name: Build and Package macOS x64 (DMG and ZIP)
+    - name: Build and Package macOS x64 (Intel - DMG and ZIP)
       run: |
         tag="${{ inputs.tag }}"
         if [ -z "$tag" ]; then
@@ -45,7 +46,7 @@ jobs:
         fi
         ./macos/build-macos.sh osx-x64
         cp "macos/AnariseVPN-macOS-osx-x64.dmg" "AnariseVPN-macOS-x64-$tag.dmg"
-        zip -r "AnariseVPN-macOS-x64-$tag.zip" macos/Anarise.app
+        ditto -c -k --sequesterRsrc --keepParent macos/Anarise.app "AnariseVPN-macOS-x64-$tag.zip"
 
     - name: Upload to Release
       env:
