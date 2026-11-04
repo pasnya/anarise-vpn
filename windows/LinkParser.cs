@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -425,6 +425,14 @@ namespace Anarise
             var config = new JsonObject();
             config["log"] = new JsonObject { ["loglevel"] = "info" };
 
+            config["dns"] = new JsonObject
+            {
+                ["servers"] = protocol == "http"
+                    ? new JsonArray("tcp://1.1.1.1", "tcp://8.8.8.8")
+                    : new JsonArray("1.1.1.1", "8.8.8.8"),
+                ["queryStrategy"] = "UseIPv4"
+            };
+
             var inbounds = new JsonArray();
 
             // SOCKS Inbound
@@ -640,7 +648,13 @@ namespace Anarise
                 ["protocol"] = "blackhole"
             };
 
-            config["outbounds"] = new JsonArray(proxyOutbound, directOutbound, blockOutbound);
+            var dnsOutbound = new JsonObject
+            {
+                ["tag"] = "dns-out",
+                ["protocol"] = "dns"
+            };
+
+            config["outbounds"] = new JsonArray(proxyOutbound, dnsOutbound, directOutbound, blockOutbound);
 
             // Routing
             var rules = new JsonArray();
@@ -652,6 +666,12 @@ namespace Anarise
                 ["network"] = "udp",
                 ["port"] = "443",
                 ["outboundTag"] = "block"
+            });
+            rules.Add(new JsonObject
+            {
+                ["type"] = "field",
+                ["port"] = "53",
+                ["outboundTag"] = "dns-out"
             });
             rules.Add(new JsonObject { ["type"] = "field", ["ip"] = new JsonArray("geoip:private"), ["outboundTag"] = "direct" });
 

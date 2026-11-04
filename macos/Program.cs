@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -112,7 +112,7 @@ public sealed class MacAppController
     private Task? binariesSetupTask;
     private bool updateChecked;
 
-    private const string AppVersion = "1.4.16";
+    private const string AppVersion = "1.4.17";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
@@ -504,6 +504,8 @@ public sealed class MacAppController
                 return;
             }
 
+            var originalDns = MacProxyManager.GetDnsServers();
+
             if (vpnMode)
             {
                 LogToUi("Запуск VPN-туннеля (TUN)...");
@@ -530,7 +532,8 @@ public sealed class MacAppController
                 killSwitchActive: killSwitch,
                 service: MacProxyManager.GetActiveService(),
                 tunRoutesActive: tunRoutesActive,
-                serverIp: savedServerIp);
+                serverIp: savedServerIp,
+                originalDnsServers: originalDns);
 
             isConnected = true;
             reconnectAttempts = 0;

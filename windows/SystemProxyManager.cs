@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -34,6 +34,7 @@ namespace Anarise
         private const string QUIC_FIREWALL_RULE = "Anarise VPN - Block Browser QUIC";
         private const string IPV6_FIREWALL_RULE = "Anarise VPN - Block IPv6";
         private const string KILL_SWITCH_FIREWALL_RULE = "Anarise VPN - Kill Switch Block";
+        private const string LAN_DNS_FIREWALL_RULE = "Anarise VPN - Block LAN DNS Leak";
         private static readonly string[] ChromiumPolicyPaths =
         {
             @"Software\Policies\Google\Chrome",
@@ -233,11 +234,26 @@ namespace Anarise
             return RunNetsh($"advfirewall firewall add rule name=\"{IPV6_FIREWALL_RULE}\" dir=out action=block remoteip=::/1,8000::/1 enable=yes profile=any");
         }
 
+        // Prevent Windows Smart Multi-Homed Name Resolution (SMHNR) from sending
+        // plaintext DNS queries to the LAN router (192.168.x.1:53 / 10.x.x.1:53)
+        // outside the TUN interface (10.0.85.1).
+        public static bool SetLanDnsBlocked(bool blocked)
+        {
+            DeleteFirewallRule(LAN_DNS_FIREWALL_RULE);
+            if (!blocked) return true;
+
+            const string lanRanges = "192.168.0.0-192.168.255.255,172.16.0.0-172.31.255.255,10.0.0.0-10.0.84.255,10.0.86.0-10.255.255.255,169.254.0.0-169.254.255.255";
+            bool udpOk = RunNetsh($"advfirewall firewall add rule name=\"{LAN_DNS_FIREWALL_RULE}\" dir=out action=block protocol=UDP remoteport=53 remoteip={lanRanges} enable=yes profile=any");
+            bool tcpOk = RunNetsh($"advfirewall firewall add rule name=\"{LAN_DNS_FIREWALL_RULE}\" dir=out action=block protocol=TCP remoteport=53 remoteip={lanRanges} enable=yes profile=any");
+            return udpOk && tcpOk;
+        }
+
         // Kill Switch blocks non-loopback/non-LAN outbound IPv4/IPv6 traffic
         // except to the active VPN server IP when the tunnel drops unexpectedly.
         public static bool SetKillSwitchBlocked(bool blocked, string? allowedServerIp = null)
         {
             DeleteFirewallRule(KILL_SWITCH_FIREWALL_RULE);
+            SetLanDnsBlocked(blocked);
             if (!blocked) return true;
 
             var ipv4Ranges = new List<string>

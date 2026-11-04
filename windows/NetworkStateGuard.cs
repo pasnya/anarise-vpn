@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.IO;
 
 namespace Anarise;
@@ -29,6 +29,7 @@ internal sealed class NetworkStateGuard
             SystemProxyManager.SetChromiumQuicAllowed(true);
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
+            SystemProxyManager.SetLanDnsBlocked(false);
             SystemProxyManager.SetKillSwitchBlocked(false);
         }
     }

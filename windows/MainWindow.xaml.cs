@@ -43,7 +43,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.16";
+        private const string AppVersion = "1.4.17";
         private const string RequiredXrayVersion = "26.7.11";
         // Binary downloads can be several dozen megabytes and may be throttled by
         // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
@@ -96,6 +96,7 @@ namespace Anarise
             // Remove stale rules left behind by an interrupted previous session.
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
+            SystemProxyManager.SetLanDnsBlocked(false);
             SystemProxyManager.SetKillSwitchBlocked(false);
 
             LoadSettings();
@@ -114,6 +115,7 @@ namespace Anarise
                 SystemProxyManager.SetChromiumQuicAllowed(true);
                 SystemProxyManager.SetBrowserQuicBlocked(false);
                 SystemProxyManager.SetIpv6Blocked(false);
+                SystemProxyManager.SetLanDnsBlocked(false);
                 SystemProxyManager.SetKillSwitchBlocked(false);
             };
         }
@@ -590,6 +592,10 @@ namespace Anarise
                 SystemProxyManager.SetChromiumQuicAllowed(false);
                 bool quicBlocked = SystemProxyManager.SetBrowserQuicBlocked(true);
                 bool ipv6Blocked = SystemProxyManager.SetIpv6Blocked(true);
+                if (useNativeXrayTun || vpnMode || isMieru)
+                {
+                    SystemProxyManager.SetLanDnsBlocked(true);
+                }
                 if (!quicBlocked)
                 {
                     // Keep the connection usable, like Throne: Xray routing and the
@@ -640,6 +646,7 @@ namespace Anarise
                 SystemProxyManager.SetChromiumQuicAllowed(true);
                 SystemProxyManager.SetBrowserQuicBlocked(false);
                 SystemProxyManager.SetIpv6Blocked(false);
+                SystemProxyManager.SetLanDnsBlocked(false);
                 SystemProxyManager.SetKillSwitchBlocked(false);
                 LogToUi("Ошибка запуска подключения: " + ex.Message);
                 if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
@@ -667,6 +674,7 @@ namespace Anarise
             SystemProxyManager.SetChromiumQuicAllowed(true);
             SystemProxyManager.SetBrowserQuicBlocked(false);
             SystemProxyManager.SetIpv6Blocked(false);
+            SystemProxyManager.SetLanDnsBlocked(false);
             if (preserveKillSwitch && killSwitch)
             {
                 bool ksApplied = SystemProxyManager.SetKillSwitchBlocked(true, lastServerIp);
@@ -776,6 +784,11 @@ namespace Anarise
                     ["dns"] = new JsonArray("1.1.1.1", "8.8.8.8"),
                     ["autoSystemRoutingTable"] = new JsonArray("0.0.0.0/0"),
                     ["autoOutboundsInterface"] = outboundInterface
+                },
+                ["sniffing"] = new JsonObject
+                {
+                    ["enabled"] = true,
+                    ["destOverride"] = new JsonArray("http", "tls", "quic")
                 }
             });
         }

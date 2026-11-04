@@ -12,6 +12,7 @@ public sealed class MacProxySettingsSnapshot
     public bool WebProxyEnabled { get; set; }
     public bool SecureWebProxyEnabled { get; set; }
     public bool SocksProxyEnabled { get; set; }
+    public string[]? OriginalDnsServers { get; set; }
 }
 
 public static class MacProxyManager
@@ -95,12 +96,54 @@ public static class MacProxyManager
 
             var socks = RunCommand("/usr/sbin/networksetup", $"-getsocksfirewallproxy \"{service}\"");
             snapshot.SocksProxyEnabled = socks.Contains("Enabled: Yes");
+
+            snapshot.OriginalDnsServers = GetDnsServers(service);
         }
         catch
         {
         }
 
         return snapshot;
+    }
+
+    public static string[] GetDnsServers(string? service = null)
+    {
+        service ??= GetActiveService();
+        try
+        {
+            var dnsOut = RunCommand("/usr/sbin/networksetup", $"-getdnsservers \"{service}\"");
+            if (string.IsNullOrWhiteSpace(dnsOut) ||
+                dnsOut.Contains("There aren't any DNS Servers", StringComparison.OrdinalIgnoreCase))
+            {
+                return Array.Empty<string>();
+            }
+
+            return dnsOut
+                .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => System.Net.IPAddress.TryParse(s, out _))
+                .ToArray();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    public static void RestoreDnsServers(string? service = null, string[]? originalDnsServers = null)
+    {
+        service ??= GetActiveService();
+        try
+        {
+            string dnsArgs = (originalDnsServers != null && originalDnsServers.Length > 0)
+                ? string.Join(" ", originalDnsServers)
+                : "Empty";
+            RunCommand("/usr/sbin/networksetup", $"-setdnsservers \"{service}\" {dnsArgs}");
+            RunCommand("/usr/bin/dscacheutil", "-flushcache");
+        }
+        catch
+        {
+        }
     }
 
     public static bool RestoreSettings(MacProxySettingsSnapshot snapshot)
@@ -115,6 +158,7 @@ public static class MacProxyManager
             if (!snapshot.SocksProxyEnabled)
                 RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxystate \"{service}\" off");
 
+            RestoreDnsServers(service, snapshot.OriginalDnsServers);
             return true;
         }
         catch
@@ -172,7 +216,10 @@ public static class MacProxyManager
                     allowed += $", {allowedServerIp.Trim()}";
                 }
 
-                string rules = $"block drop out quick proto {{ tcp, udp }} to ! {{ {allowed} }}\n";
+                // Prevent DNS leak to LAN routers (192.168.x.1:53, 10.x.x.1:53) while Kill Switch is active
+                string rules =
+                    "block drop out quick proto { tcp, udp } to { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } port 53\n" +
+                    $"block drop out quick proto {{ tcp, udp }} to ! {{ {allowed} }}\n";
                 File.WriteAllText(confPath, rules);
 
                 RunPrivilegedShell($"/sbin/pfctl -a anarise_ks -f {confPath} -e");
@@ -194,10 +241,15 @@ public static class MacProxyManager
         }
     }
 
+    private static string[]? savedTunDnsServers;
+
     public static bool ConfigureTunRoutes(string utunName, string? serverIp, string? defaultGateway)
     {
         try
         {
+            string service = GetActiveService();
+            savedTunDnsServers ??= GetDnsServers(service);
+
             var cmds = new System.Collections.Generic.List<string>
             {
                 $"/sbin/ifconfig {utunName} 10.0.85.1 10.0.85.1 netmask 255.255.255.0 up"
@@ -213,6 +265,11 @@ public static class MacProxyManager
             cmds.Add("/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true");
             cmds.Add("/sbin/route add -net 0.0.0.0/1 10.0.85.1");
             cmds.Add("/sbin/route add -net 128.0.0.0/1 10.0.85.1");
+            // Switch macOS DNS to public resolvers routed inside the utun85 0.0.0.0/1 tunnel
+            // so queries never bypass the tunnel to the local LAN router (e.g. 192.168.1.1).
+            cmds.Add($"/usr/sbin/networksetup -setdnsservers \"{service}\" 1.1.1.1 8.8.8.8");
+            cmds.Add("/usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true");
+            cmds.Add("/usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true");
 
             string combined = string.Join(" && ", cmds);
             return RunPrivilegedShell(combined);
@@ -227,10 +284,17 @@ public static class MacProxyManager
     {
         try
         {
+            string service = GetActiveService();
+            string dnsRestoreArgs = (savedTunDnsServers != null && savedTunDnsServers.Length > 0)
+                ? string.Join(" ", savedTunDnsServers)
+                : "Empty";
+
             var cmds = new System.Collections.Generic.List<string>
             {
                 "/sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true",
-                "/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true"
+                "/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true",
+                $"/usr/sbin/networksetup -setdnsservers \"{service}\" {dnsRestoreArgs} >/dev/null 2>&1 || true",
+                "/usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true"
             };
 
             if (!string.IsNullOrWhiteSpace(serverIp))
@@ -239,6 +303,7 @@ public static class MacProxyManager
             }
 
             RunPrivilegedShell(string.Join(" ; ", cmds));
+            savedTunDnsServers = null;
         }
         catch { }
     }

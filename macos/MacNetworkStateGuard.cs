@@ -11,6 +11,7 @@ public sealed class MacSessionRecoveryState
     public bool TunRoutesActive { get; set; }
     public string? ServerIp { get; set; }
     public string Service { get; set; } = "Wi-Fi";
+    public string[]? OriginalDnsServers { get; set; }
 }
 
 public static class MacNetworkStateGuard
@@ -21,7 +22,7 @@ public static class MacNetworkStateGuard
         "session-guard.json"
     );
 
-    public static void RecordSession(bool proxyActive, bool killSwitchActive, string service, bool tunRoutesActive = false, string? serverIp = null)
+    public static void RecordSession(bool proxyActive, bool killSwitchActive, string service, bool tunRoutesActive = false, string? serverIp = null, string[]? originalDnsServers = null)
     {
         try
         {
@@ -35,7 +36,8 @@ public static class MacNetworkStateGuard
                 KillSwitchActive = killSwitchActive,
                 TunRoutesActive = tunRoutesActive,
                 ServerIp = serverIp,
-                Service = service
+                Service = service,
+                OriginalDnsServers = originalDnsServers ?? MacProxyManager.GetDnsServers(service)
             };
             File.WriteAllText(StateFilePath, JsonSerializer.Serialize(state));
         }
@@ -73,6 +75,7 @@ public static class MacNetworkStateGuard
             if (state.TunRoutesActive)
             {
                 MacProxyManager.CleanupTunRoutes(state.ServerIp);
+                MacProxyManager.RestoreDnsServers(state.Service, state.OriginalDnsServers);
             }
 
             if (state.KillSwitchActive)

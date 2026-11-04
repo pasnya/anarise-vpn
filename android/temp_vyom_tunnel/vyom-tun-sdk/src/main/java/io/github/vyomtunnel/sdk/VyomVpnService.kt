@@ -1,4 +1,4 @@
-package io.github.vyomtunnel.sdk
+﻿package io.github.vyomtunnel.sdk
 
 import android.app.Application.getProcessName
 import android.app.Notification
@@ -132,11 +132,12 @@ class VyomVpnService : TProxyService() {
                 TProxyStopService()
                 Thread.sleep(500)
 
-                // Parse Mieru config
+                // Parse Mieru config and resolve server hostname via DoH
                 val obj = org.json.JSONObject(configJson)
-                val server = obj.getString("server")
                 val serverHost = obj.getString("server_host")
                 val serverPort = obj.getInt("server_port")
+                val resolvedHost = resolveDoh(serverHost)
+                val server = "$resolvedHost:$serverPort"
                 val username = obj.getString("username")
                 val password = obj.getString("password")
                 val multiplexing = obj.optString("multiplexing", "MULTIPLEXING_LOW")
@@ -164,35 +165,14 @@ class VyomVpnService : TProxyService() {
 
                 VyomLogger.i(this, "Mieru started, SOCKS5 ready, setting up TUN")
 
-                // Resolve server addresses for routing
-                val resolvedAddresses = try {
-                    java.net.InetAddress.getAllByName(serverHost).map { it.hostAddress }
-                } catch (e: Exception) {
-                    VyomLogger.e(this, "Failed to resolve server IP for $serverHost", e)
-                    emptyList<String>()
-                }
-
                 val builder = Builder()
                     .setSession(sessionName)
                     .addAddress("26.26.26.1", 24)
                     .addRoute("0.0.0.0", 0)
+                    .addDnsServer("1.1.1.1")
                     .addDnsServer("8.8.8.8")
                     .addDisallowedApplication(packageName)
                     .setMtu(1350)
-
-                if (resolvedAddresses.isNotEmpty()) {
-                    for (ip in resolvedAddresses) {
-                        try {
-                            if (ip.contains(":")) {
-                                builder.addRoute(ip, 128)
-                            } else {
-                                builder.addRoute(ip, 32)
-                            }
-                        } catch (e: Exception) {
-                            VyomLogger.e(this, "Failed to add route for server IP: $ip", e)
-                        }
-                    }
-                }
 
                 val excludedApps = VyomVpnManager.getExcludedApps(this)
                 for (pkg in excludedApps) {
@@ -254,13 +234,14 @@ class VyomVpnService : TProxyService() {
                 TProxyStopService()
                 Thread.sleep(500)
 
-                // Parse Hysteria2 config
+                // Parse Hysteria2 config and resolve server hostname via DoH
                 val obj = org.json.JSONObject(configJson)
-                val server = obj.getString("server")
                 val serverHost = obj.getString("server_host")
                 val serverPort = obj.getInt("server_port")
+                val resolvedHost = resolveDoh(serverHost)
+                val server = "$resolvedHost:$serverPort"
                 val auth = obj.getString("auth")
-                val sni = obj.optString("sni", serverHost)
+                val sni = obj.optString("sni", serverHost).ifEmpty { serverHost }
                 val insecure = obj.optBoolean("insecure", false)
                 val obfsType = obj.optString("obfs_type", "")
                 val obfsPassword = obj.optString("obfs_password", "")
@@ -290,35 +271,14 @@ class VyomVpnService : TProxyService() {
 
                 VyomLogger.i(this, "Hysteria2 started, SOCKS5 ready, setting up TUN")
 
-                // Resolve server addresses for routing
-                val resolvedAddresses = try {
-                    java.net.InetAddress.getAllByName(serverHost).map { it.hostAddress }
-                } catch (e: Exception) {
-                    VyomLogger.e(this, "Failed to resolve server IP for $serverHost", e)
-                    emptyList<String>()
-                }
-
                 val builder = Builder()
                     .setSession(sessionName)
                     .addAddress("26.26.26.1", 24)
                     .addRoute("0.0.0.0", 0)
+                    .addDnsServer("1.1.1.1")
                     .addDnsServer("8.8.8.8")
                     .addDisallowedApplication(packageName)
                     .setMtu(1350)
-
-                if (resolvedAddresses.isNotEmpty()) {
-                    for (ip in resolvedAddresses) {
-                        try {
-                            if (ip.contains(":")) {
-                                builder.addRoute(ip, 128)
-                            } else {
-                                builder.addRoute(ip, 32)
-                            }
-                        } catch (e: Exception) {
-                            VyomLogger.e(this, "Failed to add route for server IP: $ip", e)
-                        }
-                    }
-                }
 
                 val excludedApps = VyomVpnManager.getExcludedApps(this)
                 for (pkg in excludedApps) {
@@ -380,9 +340,9 @@ class VyomVpnService : TProxyService() {
                 Thread.sleep(500)
 
                 NativeEngine.initNative(this)
-                val serverIp = extractServerIp(xrayConfig)
+                val resolvedXrayConfig = resolveXrayConfigDoh(xrayConfig)
 
-                val result = NativeEngine.startXray(xrayConfig, assetPath)
+                val result = NativeEngine.startXray(resolvedXrayConfig, assetPath)
                 VyomLogger.i(this, "Xray started: $result")
 
                 if (!waitForSocks5(20808, 5000)) {
@@ -392,39 +352,14 @@ class VyomVpnService : TProxyService() {
                     return@thread
                 }
 
-                // Resolve DNS/domain name of the server to IP address(es) to avoid IllegalArgumentException in addRoute
-                val resolvedAddresses = if (!serverIp.isNullOrBlank()) {
-                    try {
-                        java.net.InetAddress.getAllByName(serverIp).map { it.hostAddress }
-                    } catch (e: Exception) {
-                        VyomLogger.e(this, "Failed to resolve server IP for $serverIp", e)
-                        emptyList<String>()
-                    }
-                } else emptyList()
-
                 val builder = Builder()
                     .setSession(sessionName)
                     .addAddress("26.26.26.1", 24)
                     .addRoute("0.0.0.0", 0)
+                    .addDnsServer("1.1.1.1")
                     .addDnsServer("8.8.8.8")
                     .addDisallowedApplication(packageName)
                     .setMtu(1350)
-
-                if (resolvedAddresses.isNotEmpty()) {
-                    for (ip in resolvedAddresses) {
-                        try {
-                            if (ip.contains(":")) {
-                                builder.addRoute(ip, 128)
-                                VyomLogger.i(this, "Route added to server IPv6: $ip/128")
-                            } else {
-                                builder.addRoute(ip, 32)
-                                VyomLogger.i(this, "Route added to server IPv4: $ip/32")
-                            }
-                        } catch (e: Exception) {
-                            VyomLogger.e(this, "Failed to add route for server IP: $ip", e)
-                        }
-                    }
-                }
 
                 val excludedApps = VyomVpnManager.getExcludedApps(this)
                 for (pkg in excludedApps) {
@@ -619,6 +554,74 @@ class VyomVpnService : TProxyService() {
         intent.putExtra("UP", up)
         intent.putExtra("DOWN", down)
         sendBroadcast(intent, "$packageName.permission.INTERNAL_VPN_EVENTS")
+    }
+
+    private fun resolveDoh(hostname: String): String {
+        val trimmed = hostname.trim()
+        if (trimmed.isEmpty() || trimmed.matches(Regex("^\\d+\\.\\d+\\.\\d+\\.\\d+$")) || trimmed.contains(":")) {
+            return trimmed
+        }
+        val endpoints = listOf(
+            "https://1.1.1.1/dns-query?name=${java.net.URLEncoder.encode(trimmed, "UTF-8")}&type=A",
+            "https://8.8.8.8/resolve?name=${java.net.URLEncoder.encode(trimmed, "UTF-8")}&type=A"
+        )
+        for (endpoint in endpoints) {
+            try {
+                val conn = (java.net.URL(endpoint).openConnection(java.net.Proxy.NO_PROXY) as javax.net.ssl.HttpsURLConnection).apply {
+                    requestMethod = "GET"
+                    setRequestProperty("Accept", "application/dns-json")
+                    connectTimeout = 4000
+                    readTimeout = 4000
+                }
+                if (conn.responseCode == 200) {
+                    val body = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = org.json.JSONObject(body)
+                    val answers = json.optJSONArray("Answer")
+                    if (answers != null) {
+                        for (i in 0 until answers.length()) {
+                            val ans = answers.getJSONObject(i)
+                            if (ans.optInt("type") == 1) {
+                                val ip = ans.optString("data").trim()
+                                if (ip.isNotEmpty()) {
+                                    VyomLogger.i(this, "[DoH] $trimmed -> $ip")
+                                    return ip
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return trimmed
+    }
+
+    private fun resolveXrayConfigDoh(config: String): String {
+        return try {
+            val obj = org.json.JSONObject(config)
+            val outbounds = obj.optJSONArray("outbounds") ?: return config
+            if (outbounds.length() > 0) {
+                val settings = outbounds.getJSONObject(0).optJSONObject("settings")
+                val vnext = settings?.optJSONArray("vnext")
+                if (vnext != null && vnext.length() > 0) {
+                    val vnextObj = vnext.getJSONObject(0)
+                    val host = vnextObj.optString("address")
+                    if (host.isNotEmpty()) {
+                        vnextObj.put("address", resolveDoh(host))
+                    }
+                }
+                val servers = settings?.optJSONArray("servers")
+                if (servers != null && servers.length() > 0) {
+                    val srvObj = servers.getJSONObject(0)
+                    val host = srvObj.optString("address")
+                    if (host.isNotEmpty()) {
+                        srvObj.put("address", resolveDoh(host))
+                    }
+                }
+            }
+            obj.toString()
+        } catch (_: Exception) {
+            config
+        }
     }
 
     private fun extractServerIp(config: String): String? {

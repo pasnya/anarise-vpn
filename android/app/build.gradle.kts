@@ -1,4 +1,4 @@
-plugins {
+﻿plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.compose.compiler)
 }
@@ -31,8 +31,8 @@ android {
         applicationId = "com.example.vlessvpn"
         minSdk = 24
         targetSdk = 36
-        versionCode = 28
-        versionName = "1.4.16"
+        versionCode = 29
+        versionName = "1.4.17"
         ndk {
             abiFilters.add("arm64-v8a")
         }
