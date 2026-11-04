@@ -167,7 +167,7 @@ public static class MacProxyManager
         }
     }
 
-    public static bool SetProxy(bool enabled, int socksPort = 20808, int httpPort = 20809, bool bypassLan = true)
+    public static bool SetProxy(bool enabled, int socksPort = 20808, int httpPort = 20809, bool bypassLan = true, bool enableHttpProxy = true)
     {
         var service = GetActiveService();
 
@@ -175,12 +175,20 @@ public static class MacProxyManager
         {
             if (enabled)
             {
-                RunCommand("/usr/sbin/networksetup", $"-setwebproxy \"{service}\" 127.0.0.1 {httpPort}");
-                RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}");
-                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}");
+                if (enableHttpProxy)
+                {
+                    RunCommand("/usr/sbin/networksetup", $"-setwebproxy \"{service}\" 127.0.0.1 {httpPort}");
+                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}");
+                    RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" on");
+                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" on");
+                }
+                else
+                {
+                    RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" off");
+                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" off");
+                }
 
-                RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" on");
-                RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" on");
+                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}");
                 RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxystate \"{service}\" on");
 
                 if (bypassLan)
@@ -252,7 +260,7 @@ public static class MacProxyManager
 
             var cmds = new System.Collections.Generic.List<string>
             {
-                $"/sbin/ifconfig {utunName} 10.0.85.1 10.0.85.1 netmask 255.255.255.0 up"
+                $"/sbin/ifconfig {utunName} 10.0.85.1 10.0.85.1 netmask 255.255.255.0 mtu 1350 up"
             };
 
             if (!string.IsNullOrWhiteSpace(serverIp) && !string.IsNullOrWhiteSpace(defaultGateway))

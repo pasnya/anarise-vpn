@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -112,7 +112,7 @@ public sealed class MacAppController
     private Task? binariesSetupTask;
     private bool updateChecked;
 
-    private const string AppVersion = "1.4.17";
+    private const string AppVersion = "1.4.18";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
@@ -524,7 +524,7 @@ public sealed class MacAppController
             else if (systemProxy)
             {
                 LogToUi("Настройка системного прокси macOS...");
-                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan);
+                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan, enableHttpProxy: !isMieru);
             }
 
             MacNetworkStateGuard.RecordSession(

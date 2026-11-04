@@ -148,11 +148,15 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-settings-back').addEventListener('click', () => switchScreen('main'));
     document.getElementById('btn-sidebar-settings').addEventListener('click', () => switchScreen('settings'));
 
-    document.querySelectorAll('[data-nav-tab]').forEach(btn => {
+    document.querySelectorAll('.sidebar-nav-item[data-nav-view]').forEach(btn => {
         btn.addEventListener('click', () => {
+            const view = btn.dataset.navView;
+            setMainView(view);
             const tabId = btn.dataset.navTab;
-            const tabButton = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
-            if (tabButton) switchTab(tabButton, tabId);
+            if (tabId) {
+                const tabButton = document.querySelector(`.tab-btn[data-tab="${tabId}"]`);
+                if (tabButton) switchTab(tabButton, tabId);
+            }
             document.querySelectorAll('.sidebar-nav-item').forEach(item => item.classList.remove('active'));
             btn.classList.add('active');
         });
@@ -284,6 +288,20 @@ function switchScreen(screenName) {
     });
 }
 
+// --- VIEW SWITCHING ON MAIN SCREEN ---
+function setMainView(viewName) {
+    const mainScreen = document.getElementById('screen-main');
+    if (!mainScreen) return;
+    mainScreen.classList.remove('view-dashboard', 'view-servers', 'view-diagnostics');
+    if (viewName === 'servers') {
+        mainScreen.classList.add('view-servers');
+    } else if (viewName === 'diagnostics') {
+        mainScreen.classList.add('view-diagnostics');
+    } else {
+        mainScreen.classList.add('view-dashboard');
+    }
+}
+
 // --- TABS SYSTEM ---
 function switchTab(clickedBtn, tabId) {
     document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
@@ -291,6 +309,20 @@ function switchTab(clickedBtn, tabId) {
 
     clickedBtn.classList.add('active');
     document.getElementById(tabId).classList.add('active');
+
+    // Sync sidebar state when bottom tabs are clicked
+    if (tabId === 'tab-logs') {
+        document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.navView === 'diagnostics');
+        });
+    } else if (tabId === 'tab-servers' || tabId === 'tab-external') {
+        const currentActive = document.querySelector('.sidebar-nav-item.active');
+        if (currentActive && currentActive.dataset.navView === 'diagnostics') {
+            document.querySelectorAll('.sidebar-nav-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.navView === 'servers');
+            });
+        }
+    }
 
     // Trigger actions when entering specific tabs
     if (tabId === 'tab-external') requestExternalRefresh();

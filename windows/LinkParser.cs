@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -427,9 +427,7 @@ namespace Anarise
 
             config["dns"] = new JsonObject
             {
-                ["servers"] = protocol == "http"
-                    ? new JsonArray("tcp://1.1.1.1", "tcp://8.8.8.8")
-                    : new JsonArray("1.1.1.1", "8.8.8.8"),
+                ["servers"] = new JsonArray("tcp://1.1.1.1", "tcp://8.8.8.8"),
                 ["queryStrategy"] = "UseIPv4"
             };
 
@@ -445,7 +443,8 @@ namespace Anarise
                 ["sniffing"] = new JsonObject
                 {
                     ["enabled"] = true,
-                    ["destOverride"] = new JsonArray("http", "tls", "quic")
+                    ["destOverride"] = new JsonArray("http", "tls", "quic"),
+                    ["routeOnly"] = true
                 }
             };
             inbounds.Add(socksInbound);
@@ -460,7 +459,8 @@ namespace Anarise
                 ["sniffing"] = new JsonObject
                 {
                     ["enabled"] = true,
-                    ["destOverride"] = new JsonArray("http", "tls", "quic")
+                    ["destOverride"] = new JsonArray("http", "tls", "quic"),
+                    ["routeOnly"] = true
                 }
             };
             inbounds.Add(httpInbound);

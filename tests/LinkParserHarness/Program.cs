@@ -1,4 +1,4 @@
-﻿using System.Text;
+using System.Text;
 using System.Text.Json;
 using Anarise;
 
@@ -116,12 +116,14 @@ if (args.Contains("--service-tests", StringComparer.OrdinalIgnoreCase))
         return Fail("DesktopCoreServices.BuildRuntimeCoreConfig failed for Hysteria2.");
 
     using var vlessDnsDoc = JsonDocument.Parse(LinkParser.Parse("vless://00000000-0000-4000-8000-000000000001@example.com:443?type=tcp&security=tls"));
-    if (vlessDnsDoc.RootElement.GetProperty("dns").GetProperty("servers")[0].GetString() != "1.1.1.1")
-        return Fail("LinkParser VLESS config must include 1.1.1.1 DNS server.");
+    if (vlessDnsDoc.RootElement.GetProperty("dns").GetProperty("servers")[0].GetString() != "tcp://1.1.1.1")
+        return Fail("LinkParser VLESS config must include tcp://1.1.1.1 DNS server.");
     if (!vlessDnsDoc.RootElement.GetProperty("outbounds").EnumerateArray().Any(o => o.GetProperty("tag").GetString() == "dns-out" && o.GetProperty("protocol").GetString() == "dns"))
         return Fail("LinkParser VLESS config must include dns-out outbound.");
     if (!vlessDnsDoc.RootElement.GetProperty("routing").GetProperty("rules").EnumerateArray().Any(r => r.TryGetProperty("port", out var p) && p.GetString() == "53" && r.GetProperty("outboundTag").GetString() == "dns-out"))
         return Fail("LinkParser VLESS config must intercept port 53 to dns-out.");
+    if (!vlessDnsDoc.RootElement.GetProperty("inbounds")[0].GetProperty("sniffing").GetProperty("routeOnly").GetBoolean())
+        return Fail("LinkParser VLESS inbound sniffing must set routeOnly=true.");
 
     using var naiveDnsDoc = JsonDocument.Parse(LinkParser.Parse("naive+https://user:pass@example.com:443"));
     if (naiveDnsDoc.RootElement.GetProperty("dns").GetProperty("servers")[0].GetString() != "tcp://1.1.1.1")

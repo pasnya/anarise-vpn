@@ -297,13 +297,8 @@ object LinkParser {
 
         config.put("dns", JSONObject().apply {
             put("servers", JSONArray().apply {
-                if (protocol == "http") {
-                    put("tcp://1.1.1.1")
-                    put("tcp://8.8.8.8")
-                } else {
-                    put("1.1.1.1")
-                    put("8.8.8.8")
-                }
+                put("tcp://1.1.1.1")
+                put("tcp://8.8.8.8")
             })
             put("queryStrategy", "UseIPv4")
         })
@@ -319,6 +314,7 @@ object LinkParser {
                     put("destOverride", JSONArray().apply {
                         put("http"); put("tls"); put("quic")
                     })
+                    put("routeOnly", true)
                 })
             }
         ))
@@ -459,8 +455,14 @@ object LinkParser {
         })
 
         config.put("routing", JSONObject().apply {
-            put("domainStrategy", "IPIfNonMatch")
+            put("domainStrategy", "AsIs")
             put("rules", JSONArray().apply {
+                put(JSONObject().apply {
+                    put("type", "field")
+                    put("network", "udp")
+                    put("port", "443")
+                    put("outboundTag", "direct")
+                })
                 put(JSONObject().apply {
                     put("type", "field")
                     put("port", "53") // Intercept DNS

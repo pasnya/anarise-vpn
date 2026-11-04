@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -43,7 +43,7 @@ namespace Anarise
         private int httpPort = 20809;
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.17";
+        private const string AppVersion = "1.4.18";
         private const string RequiredXrayVersion = "26.7.11";
         // Binary downloads can be several dozen megabytes and may be throttled by
         // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
@@ -779,7 +779,7 @@ namespace Anarise
                 ["settings"] = new JsonObject
                 {
                     ["name"] = "anarise-xray",
-                    ["mtu"] = 1500,
+                    ["mtu"] = 1350,
                     ["gateway"] = new JsonArray("10.0.85.1/24"),
                     ["dns"] = new JsonArray("1.1.1.1", "8.8.8.8"),
                     ["autoSystemRoutingTable"] = new JsonArray("0.0.0.0/0"),
@@ -788,7 +788,8 @@ namespace Anarise
                 ["sniffing"] = new JsonObject
                 {
                     ["enabled"] = true,
-                    ["destOverride"] = new JsonArray("http", "tls", "quic")
+                    ["destOverride"] = new JsonArray("http", "tls", "quic"),
+                    ["routeOnly"] = true
                 }
             });
         }

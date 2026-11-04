@@ -1017,6 +1017,39 @@ body { font-family: 'Manrope', 'Inter', sans-serif; }
 #screen-main > .connect-button-container { width: auto; margin: 0 20px 12px; padding: 0; }
 #screen-main > .exit-ip-card, #screen-main > .stats-grid, #screen-main > .duration-card { margin-left: 20px; margin-right: 20px; width: auto; }
 #screen-main > .tab-row, #screen-main > .tab-content-container { min-width: 0; }
+
+/* View Switching modes when navigating via Sidebar */
+#screen-main.view-servers > .network-hero,
+#screen-main.view-servers > .status-container,
+#screen-main.view-servers > .action-row,
+#screen-main.view-servers > .active-server-card,
+#screen-main.view-servers > .connect-button-container,
+#screen-main.view-servers > .exit-ip-card,
+#screen-main.view-servers > .stats-grid,
+#screen-main.view-servers > .duration-card,
+#screen-main.view-diagnostics > .network-hero,
+#screen-main.view-diagnostics > .status-container,
+#screen-main.view-diagnostics > .action-row,
+#screen-main.view-diagnostics > .active-server-card,
+#screen-main.view-diagnostics > .connect-button-container,
+#screen-main.view-diagnostics > .exit-ip-card,
+#screen-main.view-diagnostics > .stats-grid,
+#screen-main.view-diagnostics > .duration-card {
+    display: none !important;
+}
+
+#screen-main.view-servers > .tab-row,
+#screen-main.view-diagnostics > .tab-row {
+    margin-top: 14px;
+}
+
+#screen-main.view-servers .servers-list {
+    max-height: calc(100vh - 220px);
+}
+
+#screen-main.view-diagnostics .logs-view {
+    max-height: calc(100vh - 180px);
+}
 .variant-sidebar { grid-column: 1; grid-row: 1 / -1; position: sticky; top: 0; height: 100%; min-height: 680px; padding: 20px 12px 14px; border-right: 1px solid rgba(148,163,184,.12); background: rgba(6,10,20,.92); display: flex; flex-direction: column; gap: 16px; }
 .sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 2px 5px 18px; border-bottom: 1px solid rgba(148,163,184,.12); }
 .sidebar-logo { width: 28px; height: 28px; object-fit: contain; }
