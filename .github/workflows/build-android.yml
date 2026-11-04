@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Existing release tag to upload to (for example v1.4.15)'
+        description: 'Existing release tag to upload to (for example v1.4.16)'
         required: true
 
 permissions:
@@ -37,26 +37,31 @@ jobs:
         ANARISE_KEY_ALIAS: ${{ secrets.ANARISE_KEY_ALIAS }}
         ANARISE_KEY_PASSWORD: ${{ secrets.ANARISE_KEY_PASSWORD }}
       run: |
-        for name in ANDROID_KEYSTORE_BASE64 ANARISE_STORE_PASSWORD ANARISE_KEY_ALIAS ANARISE_KEY_PASSWORD; do
-          if [ -z "${!name}" ]; then
-            echo "::error::Missing required repository secret for $name."
-            exit 1
-          fi
-        done
-        keystore_path="$RUNNER_TEMP/anarise-release.jks"
-        printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
-        echo "ANARISE_STORE_FILE=$keystore_path" >> "$GITHUB_ENV"
+        if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANARISE_STORE_PASSWORD" ] && [ -n "$ANARISE_KEY_ALIAS" ] && [ -n "$ANARISE_KEY_PASSWORD" ]; then
+          keystore_path="$RUNNER_TEMP/anarise-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+          echo "ANARISE_STORE_FILE=$keystore_path" >> "$GITHUB_ENV"
+          echo "HAS_SIGNING_SECRETS=true" >> "$GITHUB_ENV"
+        else
+          echo "::notice::Signing secrets not configured; falling back to assembleDebug."
+          echo "HAS_SIGNING_SECRETS=false" >> "$GITHUB_ENV"
+        fi
 
     - name: Grant execute permission for gradlew
       run: chmod +x android/gradlew
 
-    - name: Build Release APK
+    - name: Build APK
       working-directory: android
       env:
         ANARISE_STORE_PASSWORD: ${{ secrets.ANARISE_STORE_PASSWORD }}
         ANARISE_KEY_ALIAS: ${{ secrets.ANARISE_KEY_ALIAS }}
         ANARISE_KEY_PASSWORD: ${{ secrets.ANARISE_KEY_PASSWORD }}
-      run: ./gradlew assembleRelease
+      run: |
+        if [ "$HAS_SIGNING_SECRETS" = "true" ]; then
+          ./gradlew assembleRelease
+        else
+          ./gradlew assembleDebug
+        fi
 
     - name: Upload to Release
       env:
@@ -71,6 +76,11 @@ jobs:
           echo "::error::Release '$tag' does not exist."
           exit 1
         fi
-        asset="AnariseVPN-Android-arm64-${tag}.apk"
-        cp android/app/build/outputs/apk/release/app-release.apk "$asset"
+        if [ "$HAS_SIGNING_SECRETS" = "true" ]; then
+          asset="AnariseVPN-Android-arm64-${tag}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$asset"
+        else
+          asset="AnariseVPN-Android-debug-${tag}.apk"
+          cp android/app/build/outputs/apk/debug/app-debug.apk "$asset"
+        fi
         gh release upload "$tag" "$asset" --clobber
