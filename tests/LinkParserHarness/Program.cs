@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using System.Text.Json;
 using Anarise;
 
@@ -94,7 +94,28 @@ if (args.Contains("--service-tests", StringComparer.OrdinalIgnoreCase))
     if (from15Mac == null || from15Mac.LatestVersion != "1.4.16" || from15Mac.DownloadUrl != "https://example.com/mac.dmg")
         return Fail($"macOS update from 1.4.15 picked wrong release/asset: {from15Mac?.LatestVersion} / {from15Mac?.DownloadUrl}");
 
-    Console.WriteLine("Service tests: StatisticsService and UpdateVersionHelper passed");
+    string plainSecret = "{\"socksPort\":20808,\"currentConfigLink\":\"vless://secret\"}";
+    string protectedSecret = SecureStorage.Protect(plainSecret);
+    if (protectedSecret == plainSecret)
+        return Fail("SecureStorage.Protect must not return plaintext.");
+    if (SecureStorage.Unprotect(protectedSecret) != plainSecret)
+        return Fail("SecureStorage.Unprotect failed to round-trip protected secret.");
+
+    if (!DesktopCoreServices.IsSupportedShareLink("vless://00000000-0000-4000-8000-000000000001@example.com:443") ||
+        !DesktopCoreServices.IsSupportedShareLink("hy2://pass@example.com:443") ||
+        DesktopCoreServices.IsSupportedShareLink("http://example.com"))
+        return Fail("DesktopCoreServices.IsSupportedShareLink returned unexpected result.");
+
+    string parsedHysteria = LinkParser.Parse("hy2://pass@198.51.100.10:8443?sni=example.com&obfs=salamander&obfs-password=secret", 20808, 20809);
+    if (DesktopCoreServices.ExtractServerIp(parsedHysteria) != "198.51.100.10")
+        return Fail("DesktopCoreServices.ExtractServerIp failed for Hysteria2 IP.");
+    string runtimeHy2 = DesktopCoreServices.BuildRuntimeCoreConfig(parsedHysteria, 20808, 20809, isMieru: false, isHysteria: true);
+    using var hy2Doc = JsonDocument.Parse(runtimeHy2);
+    if (hy2Doc.RootElement.GetProperty("socks5").GetProperty("listen").GetString() != "127.0.0.1:20808" ||
+        hy2Doc.RootElement.GetProperty("obfs").GetProperty("salamander").GetProperty("password").GetString() != "secret")
+        return Fail("DesktopCoreServices.BuildRuntimeCoreConfig failed for Hysteria2.");
+
+    Console.WriteLine("Service tests: StatisticsService, UpdateVersionHelper, SecureStorage, and DesktopCoreServices passed");
     return 0;
 }
 

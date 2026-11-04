@@ -112,19 +112,11 @@ public sealed class MacAppController
 
     private const string AppVersion = "1.4.16";
     private const string RequiredXrayVersion = "26.7.11";
-    private const int MaxSubscriptionBytes = 1 * 1024 * 1024;
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
     private static readonly TimeSpan BinaryDownloadTimeout = TimeSpan.FromMinutes(15);
 
     private readonly SemaphoreSlim validationSlots = new(3, 3);
-    private static readonly HttpClient DnsOverHttpsClient = new(new HttpClientHandler
-    {
-        UseProxy = false
-    })
-    {
-        Timeout = TimeSpan.FromSeconds(5)
-    };
 
     public MacAppController()
     {
@@ -466,103 +458,15 @@ public sealed class MacAppController
 
             if (gen != connectionGeneration) return;
 
-            savedServerIp = ExtractServerIp(parsedConfig);
+            savedServerIp = DesktopCoreServices.ExtractServerIp(parsedConfig);
             var (defaultIface, defaultGw) = MacProxyManager.GetDefaultRouteInfo();
             activePhysicalInterfaceName = defaultIface;
             savedDefaultGateway = defaultGw;
 
             string configFilePath = Path.Combine(appDataDir,
                 isMieru ? "mieru_config.json" : isHysteria ? "hysteria_config.json" : "xray_config.json");
-
-            if (isMieru)
-            {
-                var rawMieruConfig = JsonNode.Parse(parsedConfig)!.AsObject();
-                string host = rawMieruConfig["server_host"]?.ToString() ?? "";
-                bool isIp = IPAddress.TryParse(host, out _);
-                var profile = new JsonObject
-                {
-                    ["profileName"] = "default",
-                    ["user"] = new JsonObject
-                    {
-                        ["name"] = rawMieruConfig["username"]?.ToString(),
-                        ["password"] = rawMieruConfig["password"]?.ToString()
-                    },
-                    ["servers"] = new JsonArray(new JsonObject
-                    {
-                        ["ipAddress"] = isIp ? host : "",
-                        ["domainName"] = isIp ? "" : host,
-                        ["portBindings"] = new JsonArray(new JsonObject
-                        {
-                            ["port"] = rawMieruConfig["server_port"]?.AsValue().GetValue<int>() ?? 443,
-                            ["protocol"] = (rawMieruConfig["transport"]?.ToString() ?? "TCP").ToUpperInvariant()
-                        })
-                    }),
-                    ["mtu"] = 1350,
-                    ["multiplexing"] = new JsonObject
-                    {
-                        ["level"] = (rawMieruConfig["multiplexing"]?.ToString() ?? "MULTIPLEXING_LOW").ToUpperInvariant()
-                    },
-                    ["handshakeMode"] = "HANDSHAKE_STANDARD"
-                };
-
-                var mieruConfig = new JsonObject
-                {
-                    ["profiles"] = new JsonArray(profile),
-                    ["activeProfile"] = "default",
-                    ["rpcPort"] = 20810,
-                    ["socks5Port"] = socksPort,
-                    ["socks5ListenLAN"] = false,
-                    ["loggingLevel"] = "INFO"
-                };
-                File.WriteAllText(configFilePath, mieruConfig.ToJsonString());
-            }
-            else if (isHysteria)
-            {
-                var rawHysteriaConfig = JsonNode.Parse(parsedConfig)!.AsObject();
-                var hysteriaConfig = new JsonObject
-                {
-                    ["server"] = rawHysteriaConfig["server"]?.ToString(),
-                    ["auth"] = rawHysteriaConfig["auth"]?.ToString(),
-                    ["socks5"] = new JsonObject { ["listen"] = $"127.0.0.1:{socksPort}" },
-                    ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpPort}" },
-                    ["logger"] = new JsonObject { ["level"] = "warn" }
-                };
-
-                if (rawHysteriaConfig["sni"] != null)
-                {
-                    var tlsConfig = new JsonObject
-                    {
-                        ["sni"] = rawHysteriaConfig["sni"]?.ToString(),
-                        ["insecure"] = rawHysteriaConfig["insecure"]?.AsValue().GetValue<bool>() ?? false
-                    };
-                    var alpn = rawHysteriaConfig["alpn"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(alpn))
-                    {
-                        tlsConfig["alpn"] = new JsonArray(alpn
-                            .Split(',', StringSplitOptions.RemoveEmptyEntries)
-                            .Select(v => JsonValue.Create(v.Trim()))
-                            .ToArray());
-                    }
-                    hysteriaConfig["tls"] = tlsConfig;
-                }
-
-                if (rawHysteriaConfig["obfs_type"]?.ToString() == "salamander")
-                {
-                    hysteriaConfig["obfs"] = new JsonObject
-                    {
-                        ["type"] = "salamander",
-                        ["salamander"] = new JsonObject
-                        {
-                            ["password"] = rawHysteriaConfig["obfs_password"]?.ToString() ?? ""
-                        }
-                    };
-                }
-                File.WriteAllText(configFilePath, hysteriaConfig.ToJsonString());
-            }
-            else
-            {
-                File.WriteAllText(configFilePath, parsedConfig);
-            }
+            string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria);
+            File.WriteAllText(configFilePath, finalCoreConfig);
 
             if (gen != connectionGeneration) return;
 
@@ -884,169 +788,20 @@ public sealed class MacAppController
     // --- EXIT IP CHECKER ---
     private async Task FetchExitIpInfoAsync()
     {
-        var handler = new HttpClientHandler
+        var exitIp = await DesktopCoreServices.FetchExitIpInfoAsync(socksPort, LogToUi);
+        if (exitIp != null)
         {
-            Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}"),
-            UseProxy = true
-        };
-
-        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) };
-        try
-        {
-            var json = await client.GetStringAsync("https://ipwho.is/");
-            var data = JsonNode.Parse(json);
-            if (data != null && data["success"]?.GetValue<bool>() != false)
-            {
-                var exitIp = new
-                {
-                    ip = data["ip"]?.ToString() ?? data["query"]?.ToString(),
-                    country = data["country"]?.ToString(),
-                    countryCode = data["country_code"]?.ToString() ?? data["countryCode"]?.ToString(),
-                    city = data["city"]?.ToString()
-                };
-                PostToUi(new { action = "updateExitIp", exitIp });
-                return;
-            }
-        }
-        catch { }
-
-        try
-        {
-            var json = await client.GetStringAsync("http://ip-api.com/json");
-            var data = JsonNode.Parse(json);
-            var exitIp = new
-            {
-                ip = data?["query"]?.ToString(),
-                country = data?["country"]?.ToString(),
-                countryCode = data?["countryCode"]?.ToString(),
-                city = data?["city"]?.ToString()
-            };
             PostToUi(new { action = "updateExitIp", exitIp });
-        }
-        catch (Exception ex)
-        {
-            LogToUi("Не удалось получить информацию об IP: " + ex.Message);
         }
     }
 
     // --- DOH RESOLUTION ---
-    private async Task<string> ResolveDohAsync(string hostname)
-    {
-        if (string.IsNullOrEmpty(hostname)) return hostname;
-
-        if (IPAddress.TryParse(hostname, out var literalAddress))
-        {
-            if (literalAddress.AddressFamily != AddressFamily.InterNetwork)
-            {
-                throw new InvalidOperationException($"IPv6-адрес {hostname} не поддерживается. Используйте IPv4-конфиг.");
-            }
-            return hostname;
-        }
-
-        LogToUi($"Разрешение адреса {hostname} через DoH...");
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={Uri.EscapeDataString(hostname)}&type=A");
-            request.Headers.Accept.Clear();
-            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/dns-json"));
-            using var response = await DnsOverHttpsClient.SendAsync(request);
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("Answer", out var answerProp) && answerProp.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var element in answerProp.EnumerateArray())
-                    {
-                        if (element.TryGetProperty("type", out var typeProp) && typeProp.GetInt32() == 1 &&
-                            element.TryGetProperty("data", out var dataProp))
-                        {
-                            string ip = dataProp.GetString() ?? "";
-                            if (IPAddress.TryParse(ip, out var parsedIp) && parsedIp.AddressFamily == AddressFamily.InterNetwork)
-                            {
-                                LogToUi($"Адрес {hostname} разрешён: {ip}");
-                                return ip;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            LogToUi($"DoH ошибка разрешения для {hostname}: {ex.Message}. Переход к резервному серверу.");
-        }
-
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={Uri.EscapeDataString(hostname)}&type=A");
-            request.Headers.Accept.Clear();
-            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
-            using var response = await DnsOverHttpsClient.SendAsync(request);
-            if (response.IsSuccessStatusCode)
-            {
-                var json = await response.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("Answer", out var answerProp) && answerProp.ValueKind == JsonValueKind.Array)
-                {
-                    foreach (var element in answerProp.EnumerateArray())
-                    {
-                        if (element.TryGetProperty("type", out var typeProp) && typeProp.GetInt32() == 1 &&
-                            element.TryGetProperty("data", out var dataProp))
-                        {
-                            string ip = dataProp.GetString() ?? "";
-                            if (IPAddress.TryParse(ip, out var parsedIp) && parsedIp.AddressFamily == AddressFamily.InterNetwork)
-                            {
-                                LogToUi($"Адрес {hostname} разрешён через Google DoH: {ip}");
-                                return ip;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            LogToUi($"Google DoH ошибка разрешения для {hostname}: {ex.Message}");
-        }
-
-        throw new InvalidOperationException($"Не удалось разрешить {hostname} через защищённый DoH.");
-    }
+    private Task<string> ResolveDohAsync(string hostname) =>
+        DesktopCoreServices.ResolveDohAsync(hostname, LogToUi);
 
     // --- PING & EXTERNAL SCANNING ---
-    private async Task<long> MeasurePingAsync(string link)
-    {
-        try
-        {
-            var config = JsonNode.Parse(LinkParser.Parse(link))!.AsObject();
-            if (LinkParser.IsHysteria2Config(config.ToJsonString())) return 0;
-            string host;
-            int port;
-            if (LinkParser.IsMieruConfig(config.ToJsonString()))
-            {
-                if (!string.Equals(config["transport"]?.ToString(), "TCP", StringComparison.OrdinalIgnoreCase)) return 0;
-                host = config["server_host"]!.ToString();
-                port = config["server_port"]!.GetValue<int>();
-            }
-            else
-            {
-                var settings = config["outbounds"]![0]!["settings"]!;
-                var server = (settings["vnext"] ?? settings["servers"])![0]!;
-                host = server["address"]!.ToString();
-                port = server["port"]!.GetValue<int>();
-            }
-            var timer = Stopwatch.StartNew();
-            using var socket = new TcpClient();
-            using var timeout = new CancellationTokenSource(2500);
-            await socket.ConnectAsync(host, port, timeout.Token);
-            return timer.ElapsedMilliseconds;
-        }
-        catch
-        {
-            return -1;
-        }
-    }
+    private Task<long> MeasurePingAsync(string link) =>
+        DesktopCoreServices.MeasureTcpPingAsync(link);
 
     private async Task<ServerProbeResult> VerifyProxyTrafficAsync(string link)
     {
@@ -1185,27 +940,6 @@ public sealed class MacAppController
     }
 
     // --- SUBSCRIPTION & CLIPBOARD ---
-    private static async Task<string> GetBoundedTextAsync(HttpClient client, string url)
-    {
-        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-        response.EnsureSuccessStatusCode();
-        if (response.Content.Headers.ContentLength > MaxSubscriptionBytes)
-            throw new InvalidDataException("Размер подписки превышает допустимый предел 1 МБ.");
-
-        await using var input = await response.Content.ReadAsStreamAsync();
-        using var output = new MemoryStream();
-        var buffer = new byte[8192];
-        while (true)
-        {
-            int count = await input.ReadAsync(buffer, 0, buffer.Length);
-            if (count == 0) break;
-            if (output.Length + count > MaxSubscriptionBytes)
-                throw new InvalidDataException("Размер подписки превышает допустимый предел 1 МБ.");
-            await output.WriteAsync(buffer, 0, count);
-        }
-        return Encoding.UTF8.GetString(output.ToArray());
-    }
-
     private async Task ImportSubscriptionAsync(string url)
     {
         if (string.IsNullOrEmpty(url)) return;
@@ -1214,7 +948,7 @@ public sealed class MacAppController
         using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
         try
         {
-            string content = await GetBoundedTextAsync(client, url);
+            string content = await DesktopCoreServices.GetBoundedTextAsync(client, url);
             var parsedLinks = ExternalSources.ParseSubscription(content);
             int addedCount = 0;
 
@@ -1261,10 +995,7 @@ public sealed class MacAppController
         }
 
         string text = rawText.Trim();
-        if (text.StartsWith("vless://") || text.StartsWith("vmess://") || text.StartsWith("naive+https://") ||
-            text.StartsWith("hysteria2://") || text.StartsWith("hy2://") || text.StartsWith("mieru://") ||
-            text.StartsWith("mierus://") || text.Contains("type: mieru") || text.Contains("type: \"mieru\"") ||
-            text.Contains("type: 'mieru'"))
+        if (DesktopCoreServices.IsSupportedShareLink(text))
         {
             if (!configHistory.Contains(text))
             {
@@ -1532,15 +1263,15 @@ public sealed class MacAppController
             int originalSocks = socksPort;
             int originalHttp = httpPort;
 
-            if (!IsLocalPortAvailable(socksPort, requireUdp: true))
+            if (!DesktopCoreServices.IsLocalPortAvailable(socksPort, requireUdp: true))
             {
-                socksPort = FindAvailableLocalPort(20808, requireUdp: true, excludedPort: httpPort);
+                socksPort = DesktopCoreServices.FindAvailableLocalPort(20808, requireUdp: true, excludedPort: httpPort);
                 LogToUi($"SOCKS-порт {originalSocks} занят. Автоматически выбран порт {socksPort}.");
             }
 
-            if (httpPort == socksPort || !IsLocalPortAvailable(httpPort, requireUdp: false))
+            if (httpPort == socksPort || !DesktopCoreServices.IsLocalPortAvailable(httpPort, requireUdp: false))
             {
-                httpPort = FindAvailableLocalPort(20809, requireUdp: false, excludedPort: socksPort);
+                httpPort = DesktopCoreServices.FindAvailableLocalPort(20809, requireUdp: false, excludedPort: socksPort);
                 LogToUi($"HTTP-порт {originalHttp} занят. Автоматически выбран порт {httpPort}.");
             }
 
@@ -1556,72 +1287,6 @@ public sealed class MacAppController
             LogToUi("Ошибка проверки локальных портов: " + ex.Message);
             return false;
         }
-    }
-
-    private static int FindAvailableLocalPort(int preferredPort, bool requireUdp, int excludedPort)
-    {
-        for (int offset = 0; offset < 200; offset++)
-        {
-            int candidate = preferredPort + offset;
-            if (candidate > 65535 || candidate == excludedPort) continue;
-            if (IsLocalPortAvailable(candidate, requireUdp)) return candidate;
-        }
-        throw new InvalidOperationException("No free local proxy port was found.");
-    }
-
-    private static bool IsLocalPortAvailable(int port, bool requireUdp)
-    {
-        if (port < 1 || port > 65535) return false;
-        try
-        {
-            using var tcpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-            tcpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
-            if (requireUdp)
-            {
-                using var udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
-                udpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
-            }
-            return true;
-        }
-        catch (SocketException)
-        {
-            return false;
-        }
-    }
-
-    private static string? ExtractServerIp(string configJson)
-    {
-        try
-        {
-            var doc = JsonNode.Parse(configJson);
-            var protocol = doc?["_protocol"]?.ToString();
-            if (protocol == LinkParser.PROTOCOL_HYSTERIA2 || protocol == LinkParser.PROTOCOL_MIERU)
-            {
-                string? server = doc?["server_host"]?.ToString() ?? doc?["server"]?.ToString();
-                if (!string.IsNullOrEmpty(server))
-                {
-                    int colonIdx = server.LastIndexOf(':');
-                    if (colonIdx > 0) server = server.Substring(0, colonIdx);
-                    if (IPAddress.TryParse(server, out _)) return server;
-                }
-            }
-            else
-            {
-                var outbounds = doc?["outbounds"]?.AsArray();
-                if (outbounds != null && outbounds.Count > 0)
-                {
-                    var settings = outbounds[0]?["settings"];
-                    string? address = settings?["vnext"]?[0]?["address"]?.ToString()
-                                   ?? settings?["servers"]?[0]?["address"]?.ToString();
-                    if (!string.IsNullOrEmpty(address) && IPAddress.TryParse(address, out _))
-                    {
-                        return address;
-                    }
-                }
-            }
-        }
-        catch { }
-        return null;
     }
 
     private void KillOrphanedProcesses()
@@ -1713,11 +1378,16 @@ public sealed class MacAppController
 
     private void LoadSettings()
     {
-        try
+        if (!SecureStorage.TryRead(settingsPath, out var json))
         {
-            if (File.Exists(settingsPath))
+            json = TryMigratePlaintext(settingsPath);
+        }
+
+        if (json != null)
+        {
+            try
             {
-                var doc = JsonNode.Parse(File.ReadAllText(settingsPath));
+                var doc = JsonNode.Parse(json);
                 if (doc != null)
                 {
                     killSwitch = doc["killSwitch"]?.GetValue<bool>() ?? false;
@@ -1731,8 +1401,8 @@ public sealed class MacAppController
                     currentConfigLink = doc["currentConfigLink"]?.ToString() ?? "";
                 }
             }
+            catch { }
         }
-        catch { }
     }
 
     private void SaveSettings()
@@ -1751,35 +1421,55 @@ public sealed class MacAppController
                 ["httpPort"] = httpPort,
                 ["currentConfigLink"] = currentConfigLink
             };
-            File.WriteAllText(settingsPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            SecureStorage.Write(settingsPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         }
         catch { }
     }
 
     private void LoadHistory()
     {
-        try
+        if (!SecureStorage.TryRead(historyPath, out var json))
         {
-            if (File.Exists(historyPath))
+            json = TryMigratePlaintext(historyPath);
+        }
+
+        if (json != null)
+        {
+            try
             {
-                var list = JsonSerializer.Deserialize<List<string>>(File.ReadAllText(historyPath));
+                var list = JsonSerializer.Deserialize<List<string>>(json);
                 if (list != null)
                 {
                     configHistory.Clear();
                     configHistory.AddRange(list);
                 }
             }
+            catch { }
         }
-        catch { }
     }
 
     private void SaveHistory()
     {
         try
         {
-            File.WriteAllText(historyPath, JsonSerializer.Serialize(configHistory, new JsonSerializerOptions { WriteIndented = true }));
+            SecureStorage.Write(historyPath, JsonSerializer.Serialize(configHistory, new JsonSerializerOptions { WriteIndented = true }));
         }
         catch { }
+    }
+
+    private static string? TryMigratePlaintext(string path)
+    {
+        try
+        {
+            if (!File.Exists(path)) return null;
+            var plaintext = File.ReadAllText(path);
+            SecureStorage.Write(path, plaintext);
+            return plaintext;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public void OnClosing()
