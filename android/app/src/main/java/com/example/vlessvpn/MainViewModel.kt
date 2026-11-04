@@ -19,10 +19,56 @@ import kotlinx.coroutines.sync.withLock
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private companion object {
+    companion object {
         const val MAX_SUBSCRIPTION_BYTES = 1 * 1024 * 1024
         const val EXTERNAL_CONFIG_BATCH_SIZE = 200
         const val EXTERNAL_TRAFFIC_BATCH_SIZE = 20
+
+        internal fun normalizeVersionTag(rawTag: String?): String {
+            if (rawTag.isNullOrBlank()) return ""
+            var clean = rawTag.trim()
+            while (clean.startsWith("v", ignoreCase = true)) {
+                clean = clean.substring(1).trim()
+            }
+            val suffixIdx = clean.indexOfAny(charArrayOf('-', '+'))
+            if (suffixIdx >= 0) {
+                clean = clean.substring(0, suffixIdx).trim()
+            }
+            return clean
+        }
+
+        internal fun parseVersionParts(rawTag: String?): List<Int>? {
+            val clean = normalizeVersionTag(rawTag)
+            if (clean.isEmpty()) return null
+            val parts = clean.split('.').filter { it.isNotEmpty() }
+            if (parts.isEmpty()) return null
+            val nums = mutableListOf<Int>()
+            for (part in parts) {
+                val n = part.toIntOrNull() ?: return null
+                if (n < 0) return null
+                nums.add(n)
+            }
+            while (nums.size < 3) {
+                nums.add(0)
+            }
+            return nums
+        }
+
+        internal fun isNewerVersion(candidateTag: String?, currentVersion: String?): Boolean {
+            val cand = parseVersionParts(candidateTag) ?: return false
+            val curr = parseVersionParts(currentVersion) ?: return false
+            val len = maxOf(cand.size, curr.size)
+            for (i in 0 until len) {
+                val c = cand.getOrElse(i) { 0 }
+                val r = curr.getOrElse(i) { 0 }
+                if (c != r) return c > r
+            }
+            return false
+        }
+    }
+
+    private val updatePrefs by lazy {
+        getApplication<Application>().getSharedPreferences("anarise_update_prefs", android.content.Context.MODE_PRIVATE)
     }
 
     private val _vpnState = MutableStateFlow(VyomState.DISCONNECTED)
@@ -332,10 +378,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun parseSubscriptionContent(content: String): List<String> = ExternalSources.parse(content)
 
+    private var updateChecked = false
+
     fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {
+        if (updateChecked) return
+        updateChecked = true
+
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val url = java.net.URL("https://api.github.com/repos/pasnya/anarise-vpn/releases/latest")
+                val url = java.net.URL("https://api.github.com/repos/pasnya/anarise-vpn/releases?per_page=10")
                 val connection = url.openConnection() as java.net.HttpURLConnection
                 connection.setRequestProperty("User-Agent", "VlessVPN-App")
                 connection.connectTimeout = 5000
@@ -343,21 +394,43 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (connection.responseCode == 200) {
                     val responseText = connection.inputStream.bufferedReader().use { it.readText() }
-                    val jsonObject = org.json.JSONObject(responseText)
-                    
-                    val latestTag = jsonObject.getString("tag_name").replace("v", "").trim()
-                    val currentClean = currentVersion.replace("v", "").trim()
+                    val releasesArray = org.json.JSONArray(responseText)
+                    val dismissedVersion = updatePrefs.getString("dismissed_update_version", null)
 
-                    if (latestTag != currentClean) {
-                        val assets = jsonObject.optJSONArray("assets")
-                        val downloadUrl = if (assets != null && assets.length() > 0) {
-                            assets.getJSONObject(0).getString("browser_download_url")
-                        } else {
-                            jsonObject.getString("html_url")
+                    var bestVersion = normalizeVersionTag(currentVersion)
+                    var bestRelease: org.json.JSONObject? = null
+
+                    for (i in 0 until releasesArray.length()) {
+                        val rel = releasesArray.optJSONObject(i) ?: continue
+                        if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue
+                        val tag = normalizeVersionTag(rel.optString("tag_name", ""))
+                        if (tag.isNotEmpty() && isNewerVersion(tag, bestVersion)) {
+                            bestVersion = tag
+                            bestRelease = rel
+                        }
+                    }
+
+                    if (bestRelease != null && bestVersion != dismissedVersion) {
+                        val assets = bestRelease.optJSONArray("assets")
+                        var downloadUrl = bestRelease.optString("html_url", "https://github.com/pasnya/anarise-vpn/releases/latest")
+                        if (assets != null && assets.length() > 0) {
+                            var apkUrl: String? = null
+                            for (j in 0 until assets.length()) {
+                                val asset = assets.optJSONObject(j) ?: continue
+                                val assetName = asset.optString("name", "")
+                                val browserUrl = asset.optString("browser_download_url", "")
+                                if (assetName.endsWith(".apk", ignoreCase = true) && browserUrl.isNotEmpty()) {
+                                    apkUrl = browserUrl
+                                    break
+                                }
+                            }
+                            if (apkUrl != null) {
+                                downloadUrl = apkUrl
+                            }
                         }
 
                         withContext(Dispatchers.Main) {
-                            onNewVersionAvailable(latestTag, downloadUrl)
+                            onNewVersionAvailable(bestVersion, downloadUrl)
                         }
                     }
                 }
@@ -365,6 +438,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 e.printStackTrace()
             }
         }
+    }
+
+    fun dismissUpdateVersion(version: String) {
+        updatePrefs.edit().putString("dismissed_update_version", normalizeVersionTag(version)).apply()
     }
 
     private val _externalConfigs = MutableStateFlow<List<Pair<String, Long>>>(emptyList())

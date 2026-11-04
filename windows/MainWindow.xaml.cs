@@ -55,6 +55,7 @@ namespace Anarise
         private bool externalScanInProgress;
         private CancellationTokenSource? externalScanCts;
         private Task? binariesSetupTask;
+        private bool updateChecked;
         private NetworkStateGuard networkStateGuard;
         private CancellationTokenSource? reconnectCts;
         private int reconnectAttempts;
@@ -2360,6 +2361,9 @@ namespace Anarise
 
         private void CheckForUpdates()
         {
+            if (updateChecked) return;
+            updateChecked = true;
+
             _ = Task.Run(async () =>
             {
                 try
@@ -2369,38 +2373,17 @@ namespace Anarise
                         client.DefaultRequestHeaders.UserAgent.ParseAdd("AnariseVPN-WindowsClient");
                         client.Timeout = TimeSpan.FromSeconds(10);
                         
-                        using var response = await client.GetAsync("https://api.github.com/repos/pasnya/anarise-vpn/releases/latest");
+                        using var response = await client.GetAsync("https://api.github.com/repos/pasnya/anarise-vpn/releases?per_page=10");
                         if (response.IsSuccessStatusCode)
                         {
                             string jsonString = await response.Content.ReadAsStringAsync();
-                            var jsonNode = JsonNode.Parse(jsonString);
-                            if (jsonNode != null)
+                            var updateResult = UpdateVersionHelper.FindNewerRelease(jsonString, AppVersion, "windows");
+                            if (updateResult != null)
                             {
-                                string latestTag = jsonNode["tag_name"]?.ToString().Replace("v", "").Trim() ?? "";
-                                string currentClean = AppVersion.Replace("v", "").Trim();
-                                
-                                if (latestTag != currentClean && !string.IsNullOrEmpty(latestTag))
+                                await Dispatcher.InvokeAsync(() =>
                                 {
-                                    string downloadUrl = jsonNode["html_url"]?.ToString() ?? "https://github.com/pasnya/anarise-vpn/releases/latest";
-                                    var assets = jsonNode["assets"]?.AsArray();
-                                    if (assets != null && assets.Count > 0)
-                                    {
-                                        var winAsset = assets.FirstOrDefault(a => a != null && (a["name"]?.ToString().Contains("Windows") == true || a["name"]?.ToString().Contains("zip") == true));
-                                        if (winAsset != null)
-                                        {
-                                            downloadUrl = winAsset["browser_download_url"]?.ToString() ?? downloadUrl;
-                                        }
-                                        else
-                                        {
-                                            downloadUrl = assets[0]?["browser_download_url"]?.ToString() ?? downloadUrl;
-                                        }
-                                    }
-
-                                    await Dispatcher.InvokeAsync(() =>
-                                    {
-                                        PostToUi(new { action = "updateAvailable", version = latestTag, url = downloadUrl });
-                                    });
-                                }
+                                    PostToUi(new { action = "updateAvailable", version = updateResult.LatestVersion, url = updateResult.DownloadUrl });
+                                });
                             }
                         }
                     }

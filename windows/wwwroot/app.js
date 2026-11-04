@@ -261,6 +261,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Update dialog buttons
     document.getElementById('btn-update-cancel').addEventListener('click', () => {
+        if (appState.pendingUpdateVersion) {
+            try {
+                localStorage.setItem('dismissedUpdateVersion', appState.pendingUpdateVersion);
+            } catch (e) {}
+        }
         document.getElementById('dialog-update').classList.add('hidden');
     });
 
@@ -328,6 +333,13 @@ function closeImportDialog() {
 }
 
 function showUpdateDialog(version, url) {
+    if (!version) return;
+    try {
+        const dismissed = localStorage.getItem('dismissedUpdateVersion');
+        if (dismissed === version) return;
+    } catch (e) {}
+
+    appState.pendingUpdateVersion = version;
     const dialog = document.getElementById('dialog-update');
     if (dialog) {
         document.getElementById('update-dialog-text').innerText = `Доступна новая версия приложения: v${version}. Хотите скачать её?`;
@@ -337,6 +349,9 @@ function showUpdateDialog(version, url) {
         downloadBtn.parentNode.replaceChild(newDownloadBtn, downloadBtn);
         
         newDownloadBtn.addEventListener('click', () => {
+            try {
+                localStorage.setItem('dismissedUpdateVersion', version);
+            } catch (e) {}
             sendToHost('openBrowser', { url: url });
             dialog.classList.add('hidden');
         });

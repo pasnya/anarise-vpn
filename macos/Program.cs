@@ -81,6 +81,8 @@ public sealed class MacAppController
     private DateTime connectionStartTime = DateTime.UtcNow;
     private CancellationTokenSource? externalScanCts;
     private System.Threading.Timer? statsTimer;
+    private bool updateChecked;
+    private const string AppVersion = "1.4.16";
 
     public MacAppController()
     {
@@ -113,6 +115,24 @@ public sealed class MacAppController
                 case "appReady":
                     SendSettingsAndHistory();
                     _ = CheckAndDownloadBinariesAsync();
+                    CheckForUpdates();
+                    break;
+
+                case "openBrowser":
+                    string? urlToOpen = node?["url"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(urlToOpen))
+                    {
+                        try
+                        {
+                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                            {
+                                FileName = "open",
+                                Arguments = $"\"{urlToOpen}\"",
+                                UseShellExecute = false
+                            });
+                        }
+                        catch { }
+                    }
                     break;
 
                 case "connect":
@@ -443,6 +463,32 @@ public sealed class MacAppController
     private async Task CheckAndDownloadBinariesAsync()
     {
         await Task.CompletedTask;
+    }
+
+    private void CheckForUpdates()
+    {
+        if (updateChecked) return;
+        updateChecked = true;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("AnariseVPN-MacClient");
+                using var response = await client.GetAsync("https://api.github.com/repos/pasnya/anarise-vpn/releases?per_page=10");
+                if (response.IsSuccessStatusCode)
+                {
+                    string jsonString = await response.Content.ReadAsStringAsync();
+                    var updateResult = UpdateVersionHelper.FindNewerRelease(jsonString, AppVersion, "macos");
+                    if (updateResult != null)
+                    {
+                        PostToUi(new { action = "updateAvailable", version = updateResult.LatestVersion, url = updateResult.DownloadUrl });
+                    }
+                }
+            }
+            catch { }
+        });
     }
 
     private void UpdateSetting(string name, JsonNode val)

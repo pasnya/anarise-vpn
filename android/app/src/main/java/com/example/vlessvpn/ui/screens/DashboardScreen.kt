@@ -117,16 +117,22 @@ fun DashboardScreen(
     }
 
     if (updateInfo != null) {
+        val pendingVersion = updateInfo!!.first
+        val pendingUrl = updateInfo!!.second
         AlertDialog(
-            onDismissRequest = { updateInfo = null },
+            onDismissRequest = {
+                viewModel.dismissUpdateVersion(pendingVersion)
+                updateInfo = null
+            },
             title = { Text("Доступно обновление") },
-            text = { Text("Доступна новая версия приложения: v${updateInfo?.first}. Хотите скачать её?") },
+            text = { Text("Доступна новая версия приложения: v$pendingVersion. Хотите скачать её?") },
             confirmButton = {
                 Button(
                     onClick = {
+                        viewModel.dismissUpdateVersion(pendingVersion)
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(updateInfo?.second)
+                            android.net.Uri.parse(pendingUrl)
                         )
                         context.startActivity(intent)
                         updateInfo = null
@@ -136,7 +142,10 @@ fun DashboardScreen(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { updateInfo = null }) {
+                TextButton(onClick = {
+                    viewModel.dismissUpdateVersion(pendingVersion)
+                    updateInfo = null
+                }) {
                     Text("Позже")
                 }
             }

@@ -41,7 +41,53 @@ if (args.Contains("--service-tests", StringComparer.OrdinalIgnoreCase))
     var second = statistics.Update(160, 275);
     if (first.UploadSpeed != 0 || first.DownloadSpeed != 0 || second.UploadSpeed != 60 || second.DownloadSpeed != 75)
         return Fail("StatisticsService returned incorrect deltas.");
-    Console.WriteLine("Service tests: StatisticsService passed");
+
+    if (UpdateVersionHelper.IsNewerVersion("v1.4.15", "1.4.16"))
+        return Fail("Older version v1.4.15 must not be considered newer than 1.4.16.");
+    if (UpdateVersionHelper.IsNewerVersion("v1.4.16", "1.4.16"))
+        return Fail("Same version v1.4.16 must not be considered newer than 1.4.16.");
+    if (!UpdateVersionHelper.IsNewerVersion("v1.4.17", "1.4.16"))
+        return Fail("v1.4.17 must be considered newer than 1.4.16.");
+    if (!UpdateVersionHelper.IsNewerVersion("v1.5", "1.4.16"))
+        return Fail("v1.5 must be considered newer than 1.4.16.");
+
+    string mockReleasesJson = """
+    [
+      {
+        "tag_name": "v1.4.16",
+        "draft": false,
+        "prerelease": false,
+        "html_url": "https://github.com/pasnya/anarise-vpn/releases/tag/v1.4.16",
+        "assets": [
+          { "name": "AnariseVPN-macOS-arm64-v1.4.16.zip", "browser_download_url": "https://example.com/mac.zip" },
+          { "name": "AnariseVPN-macOS-arm64-v1.4.16.dmg", "browser_download_url": "https://example.com/mac.dmg" },
+          { "name": "AnariseVPN-Windows-x64-v1.4.16.zip", "browser_download_url": "https://example.com/win.zip" }
+        ]
+      },
+      {
+        "tag_name": "v1.4.15",
+        "draft": false,
+        "prerelease": false,
+        "html_url": "https://github.com/pasnya/anarise-vpn/releases/tag/v1.4.15",
+        "assets": [
+          { "name": "AnariseVPN-Windows-x64-v1.4.15.zip", "browser_download_url": "https://example.com/win15.zip" }
+        ]
+      }
+    ]
+    """;
+
+    if (UpdateVersionHelper.FindNewerRelease(mockReleasesJson, "1.4.16", "windows") != null)
+        return Fail("Running 1.4.16 must not receive update prompt when releases are 1.4.16 and 1.4.15.");
+
+    var from15Win = UpdateVersionHelper.FindNewerRelease(mockReleasesJson, "1.4.15", "windows");
+    if (from15Win == null || from15Win.LatestVersion != "1.4.16" || from15Win.DownloadUrl != "https://example.com/win.zip")
+        return Fail($"Windows update from 1.4.15 picked wrong release/asset: {from15Win?.LatestVersion} / {from15Win?.DownloadUrl}");
+
+    var from15Mac = UpdateVersionHelper.FindNewerRelease(mockReleasesJson, "1.4.15", "macos");
+    if (from15Mac == null || from15Mac.LatestVersion != "1.4.16" || from15Mac.DownloadUrl != "https://example.com/mac.dmg")
+        return Fail($"macOS update from 1.4.15 picked wrong release/asset: {from15Mac?.LatestVersion} / {from15Mac?.DownloadUrl}");
+
+    Console.WriteLine("Service tests: StatisticsService and UpdateVersionHelper passed");
     return 0;
 }
 
