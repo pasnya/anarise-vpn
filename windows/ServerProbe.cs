@@ -123,7 +123,8 @@ public sealed class ServerProbe
             catch { return new(ProbeStatus.InvalidConfig); }
             bool mieru = LinkParser.IsMieruConfig(parsed);
             bool hysteria = LinkParser.IsHysteria2Config(parsed);
-            string exe = Path.Combine(binariesPath, mieru ? "mieru.exe" : hysteria ? "hysteria.exe" : "xray.exe");
+            string ext = OperatingSystem.IsWindows() ? ".exe" : "";
+            string exe = Path.Combine(binariesPath, (mieru ? "mieru" : hysteria ? "hysteria" : "xray") + ext);
             if (!File.Exists(exe)) return new(ProbeStatus.MissingEngine);
             await File.WriteAllTextAsync(configPath, config.ToJsonString());
             var startInfo = new ProcessStartInfo

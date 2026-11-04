@@ -8,6 +8,8 @@ public sealed class MacSessionRecoveryState
 {
     public bool ProxyActive { get; set; }
     public bool KillSwitchActive { get; set; }
+    public bool TunRoutesActive { get; set; }
+    public string? ServerIp { get; set; }
     public string Service { get; set; } = "Wi-Fi";
 }
 
@@ -19,7 +21,7 @@ public static class MacNetworkStateGuard
         "session-guard.json"
     );
 
-    public static void RecordSession(bool proxyActive, bool killSwitchActive, string service)
+    public static void RecordSession(bool proxyActive, bool killSwitchActive, string service, bool tunRoutesActive = false, string? serverIp = null)
     {
         try
         {
@@ -31,6 +33,8 @@ public static class MacNetworkStateGuard
             {
                 ProxyActive = proxyActive,
                 KillSwitchActive = killSwitchActive,
+                TunRoutesActive = tunRoutesActive,
+                ServerIp = serverIp,
                 Service = service
             };
             File.WriteAllText(StateFilePath, JsonSerializer.Serialize(state));
@@ -64,6 +68,11 @@ public static class MacNetworkStateGuard
             if (state.ProxyActive)
             {
                 MacProxyManager.SetProxy(false);
+            }
+
+            if (state.TunRoutesActive)
+            {
+                MacProxyManager.CleanupTunRoutes(state.ServerIp);
             }
 
             if (state.KillSwitchActive)

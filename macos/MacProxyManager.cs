@@ -31,19 +31,30 @@ public static class MacProxyManager
         }
     }
 
+    public static (string InterfaceName, string? GatewayIp) GetDefaultRouteInfo()
+    {
+        try
+        {
+            var routeOutput = RunCommand("/sbin/route", "-n get default");
+            var ifaceMatch = Regex.Match(routeOutput, @"interface:\s+([a-zA-Z0-9]+)");
+            var gwMatch = Regex.Match(routeOutput, @"gateway:\s+([0-9\.]+)");
+
+            string iface = ifaceMatch.Success ? ifaceMatch.Groups[1].Value.Trim() : "en0";
+            string? gw = gwMatch.Success ? gwMatch.Groups[1].Value.Trim() : null;
+            return (iface, gw);
+        }
+        catch
+        {
+            return ("en0", null);
+        }
+    }
+
     private static string? DetectActiveService()
     {
         try
         {
-            // 1. Get primary default interface (e.g. en0)
-            var routeOutput = RunCommand("/sbin/route", "-n get default");
-            var ifaceMatch = Regex.Match(routeOutput, @"interface:\s+([a-zA-Z0-9]+)");
-            if (!ifaceMatch.Success)
-                return "Wi-Fi";
+            var (iface, _) = GetDefaultRouteInfo();
 
-            var iface = ifaceMatch.Groups[1].Value.Trim();
-
-            // 2. Find service name matching this device in networksetup
             var orderOutput = RunCommand("/usr/sbin/networksetup", "-listnetworkserviceorder");
             var lines = orderOutput.Split('\n');
             string? currentService = null;
@@ -120,7 +131,6 @@ public static class MacProxyManager
         {
             if (enabled)
             {
-                // Enable HTTP & HTTPS proxy
                 RunCommand("/usr/sbin/networksetup", $"-setwebproxy \"{service}\" 127.0.0.1 {httpPort}");
                 RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}");
                 RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}");
@@ -165,11 +175,11 @@ public static class MacProxyManager
                 string rules = $"block drop out quick proto {{ tcp, udp }} to ! {{ {allowed} }}\n";
                 File.WriteAllText(confPath, rules);
 
-                RunCommand("/sbin/pfctl", $"-a anarise_ks -f {confPath} -e");
+                RunPrivilegedShell($"/sbin/pfctl -a anarise_ks -f {confPath} -e");
             }
             else
             {
-                RunCommand("/sbin/pfctl", "-a anarise_ks -F all");
+                RunPrivilegedShell("/sbin/pfctl -a anarise_ks -F all");
                 if (File.Exists(confPath))
                 {
                     try { File.Delete(confPath); } catch { }
@@ -180,6 +190,189 @@ public static class MacProxyManager
         catch (Exception ex)
         {
             Console.WriteLine($"[MacProxyManager] Failed to set kill switch: {ex.Message}");
+            return false;
+        }
+    }
+
+    public static bool ConfigureTunRoutes(string utunName, string? serverIp, string? defaultGateway)
+    {
+        try
+        {
+            var cmds = new System.Collections.Generic.List<string>
+            {
+                $"/sbin/ifconfig {utunName} 10.0.85.1 10.0.85.1 netmask 255.255.255.0 up"
+            };
+
+            if (!string.IsNullOrWhiteSpace(serverIp) && !string.IsNullOrWhiteSpace(defaultGateway))
+            {
+                cmds.Add($"/sbin/route delete -host {serverIp} >/dev/null 2>&1 || true");
+                cmds.Add($"/sbin/route add -host {serverIp} {defaultGateway}");
+            }
+
+            cmds.Add("/sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true");
+            cmds.Add("/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true");
+            cmds.Add("/sbin/route add -net 0.0.0.0/1 10.0.85.1");
+            cmds.Add("/sbin/route add -net 128.0.0.0/1 10.0.85.1");
+
+            string combined = string.Join(" && ", cmds);
+            return RunPrivilegedShell(combined);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static void CleanupTunRoutes(string? serverIp)
+    {
+        try
+        {
+            var cmds = new System.Collections.Generic.List<string>
+            {
+                "/sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true",
+                "/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true"
+            };
+
+            if (!string.IsNullOrWhiteSpace(serverIp))
+            {
+                cmds.Add($"/sbin/route delete -host {serverIp} >/dev/null 2>&1 || true");
+            }
+
+            RunPrivilegedShell(string.Join(" ; ", cmds));
+        }
+        catch { }
+    }
+
+    public static bool SetAutostartLaunchAgent(bool enable)
+    {
+        try
+        {
+            string launchAgentsDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                "Library", "LaunchAgents");
+            string plistPath = Path.Combine(launchAgentsDir, "com.anarise.vpn.plist");
+
+            if (!enable)
+            {
+                if (File.Exists(plistPath))
+                {
+                    File.Delete(plistPath);
+                }
+                return true;
+            }
+
+            Directory.CreateDirectory(launchAgentsDir);
+            string exePath = Process.GetCurrentProcess().MainModule?.FileName
+                ?? Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Anarise");
+
+            string plistContent = $"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+                <plist version="1.0">
+                <dict>
+                    <key>Label</key>
+                    <string>com.anarise.vpn</string>
+                    <key>ProgramArguments</key>
+                    <array>
+                        <string>{System.Security.SecurityElement.Escape(exePath)}</string>
+                    </array>
+                    <key>RunAtLoad</key>
+                    <true/>
+                </dict>
+                </plist>
+                """;
+            File.WriteAllText(plistPath, plistContent);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[MacProxyManager] SetAutostartLaunchAgent error: {ex.Message}");
+            return false;
+        }
+    }
+
+    public static string? ReadClipboardText()
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "/usr/bin/pbpaste",
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            string text = proc.StandardOutput.ReadToEnd();
+            proc.WaitForExit(2000);
+            return text;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public static bool WriteClipboardText(string text)
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "/usr/bin/pbcopy",
+                    RedirectStandardInput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            proc.StandardInput.Write(text);
+            proc.StandardInput.Close();
+            proc.WaitForExit(2000);
+            return proc.ExitCode == 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static bool RunPrivilegedShell(string shellCommand)
+    {
+        try
+        {
+            // Check if already root
+            var idOut = RunCommand("/usr/bin/id", "-u").Trim();
+            if (idOut == "0")
+            {
+                RunCommand("/bin/sh", $"-c \"{shellCommand.Replace("\"", "\\\"")}\"");
+                return true;
+            }
+
+            string escaped = shellCommand.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = "/usr/bin/osascript",
+                    Arguments = $"-e \"do shell script \\\"{escaped}\\\" with administrator privileges\"",
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            proc.WaitForExit(30000);
+            return proc.ExitCode == 0;
+        }
+        catch
+        {
             return false;
         }
     }

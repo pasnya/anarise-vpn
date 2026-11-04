@@ -1,9 +1,16 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading;
@@ -59,30 +66,65 @@ public static class Program
 public sealed class MacAppController
 {
     private PhotinoWindow? window;
+    private Process? coreProcess;
+    private Process? tun2socksProcess;
     private readonly CoreProcessManager coreManager = new();
     private readonly StatisticsService statsService = new();
     private readonly string appDataDir;
     private readonly string settingsPath;
     private readonly string historyPath;
+    private readonly string externalCachePath;
     private readonly string binariesDir;
 
     private readonly List<string> configHistory = new();
     private string currentConfigLink = "";
     private bool killSwitch = false;
     private bool autostart = false;
-    private bool autoreconnect = false;
+    private bool autoreconnect = true;
     private bool bypassLan = true;
     private bool systemProxy = true;
     private bool vpnMode = false;
     private int socksPort = 20808;
     private int httpPort = 20809;
 
+    private bool isConnected = false;
     private string currentState = "DISCONNECTED";
     private DateTime connectionStartTime = DateTime.UtcNow;
+    private double totalUploadBytes = 0;
+    private double totalDownloadBytes = 0;
+    private double currentUploadSpeed = 0;
+    private double currentDownloadSpeed = 0;
+
+    private int connectionGeneration = 0;
+    private string? savedServerIp;
+    private string? savedDefaultGateway;
+    private string? activePhysicalInterfaceName;
+    private bool tunRoutesActive;
+
+    private bool externalScanInProgress;
     private CancellationTokenSource? externalScanCts;
+    private CancellationTokenSource? reconnectCts;
+    private int reconnectAttempts;
+    private bool reconnectInProgress;
     private System.Threading.Timer? statsTimer;
+    private Task? binariesSetupTask;
     private bool updateChecked;
+
     private const string AppVersion = "1.4.16";
+    private const string RequiredXrayVersion = "26.7.11";
+    private const int MaxSubscriptionBytes = 1 * 1024 * 1024;
+    private const int ExternalConfigBatchSize = 200;
+    private const int ExternalTrafficBatchSize = 30;
+    private static readonly TimeSpan BinaryDownloadTimeout = TimeSpan.FromMinutes(15);
+
+    private readonly SemaphoreSlim validationSlots = new(3, 3);
+    private static readonly HttpClient DnsOverHttpsClient = new(new HttpClientHandler
+    {
+        UseProxy = false
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(5)
+    };
 
     public MacAppController()
     {
@@ -90,9 +132,12 @@ public sealed class MacAppController
         Directory.CreateDirectory(appDataDir);
         settingsPath = Path.Combine(appDataDir, "settings.json");
         historyPath = Path.Combine(appDataDir, "history.json");
+        externalCachePath = Path.Combine(appDataDir, "external_cache.json");
         binariesDir = Path.Combine(appDataDir, "bin");
         Directory.CreateDirectory(binariesDir);
 
+        KillOrphanedProcesses();
+        CleanupRuntimeConfigFiles();
         LoadSettings();
         LoadHistory();
     }
@@ -102,7 +147,7 @@ public sealed class MacAppController
         window = win;
     }
 
-    public void HandleWebMessage(string message)
+    public async void HandleWebMessage(string message)
     {
         try
         {
@@ -114,29 +159,25 @@ public sealed class MacAppController
             {
                 case "appReady":
                     SendSettingsAndHistory();
-                    _ = CheckAndDownloadBinariesAsync();
+                    binariesSetupTask ??= CheckAndDownloadBinariesAsync();
+                    await binariesSetupTask;
                     CheckForUpdates();
                     break;
 
-                case "openBrowser":
-                    string? urlToOpen = node?["url"]?.ToString();
-                    if (!string.IsNullOrWhiteSpace(urlToOpen))
+                case "pasteFromClipboard":
+                    PasteFromClipboard();
+                    break;
+
+                case "importSubscription":
+                    string? subUrl = node?["url"]?.ToString();
+                    if (!string.IsNullOrEmpty(subUrl))
                     {
-                        try
-                        {
-                            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                            {
-                                FileName = "open",
-                                Arguments = $"\"{urlToOpen}\"",
-                                UseShellExecute = false
-                            });
-                        }
-                        catch { }
+                        await ImportSubscriptionAsync(subUrl);
                     }
                     break;
 
                 case "connect":
-                    _ = ConnectAsync();
+                    await ConnectAsync();
                     break;
 
                 case "disconnect":
@@ -163,9 +204,6 @@ public sealed class MacAppController
                         SaveHistory();
                         PostToUi(new { action = "updateHistory", history = configHistory });
                     }
-                    break;
-
-                case "pasteFromClipboard":
                     break;
 
                 case "saveSetting":
@@ -197,11 +235,42 @@ public sealed class MacAppController
                     externalScanCts?.Cancel();
                     PostToUi(new { action = "updateExternalScanning", scanning = false });
                     break;
+
+                case "copyToClipboard":
+                    string? copyText = node?["text"]?.ToString();
+                    if (!string.IsNullOrEmpty(copyText))
+                    {
+                        if (MacProxyManager.WriteClipboardText(copyText))
+                        {
+                            PostToUi(new { action = "showToast", message = "Скопировано в буфер обмена" });
+                        }
+                    }
+                    break;
+
+                case "openBrowser":
+                    string? urlToOpen = node?["url"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(urlToOpen))
+                    {
+                        try
+                        {
+                            Process.Start(new ProcessStartInfo
+                            {
+                                FileName = "open",
+                                Arguments = $"\"{urlToOpen}\"",
+                                UseShellExecute = false
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            LogToUi("Ошибка открытия браузера: " + ex.Message);
+                        }
+                    }
+                    break;
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[MacAppController] HandleWebMessage error: {ex.Message}");
+            LogToUi($"Ошибка обработки команды UI: {ex.Message}");
         }
     }
 
@@ -216,6 +285,14 @@ public sealed class MacAppController
         {
             Console.WriteLine($"[MacAppController] PostToUi error: {ex.Message}");
         }
+    }
+
+    private void LogToUi(string message)
+    {
+        string cleanMsg = message.Replace("\n", " ").Replace("\r", " ").Trim();
+        if (string.IsNullOrEmpty(cleanMsg)) return;
+        string logLine = $"[{DateTime.Now:HH:mm:ss}] {cleanMsg}";
+        PostToUi(new { action = "addLog", log = logLine });
     }
 
     private void SendSettingsAndHistory()
@@ -237,62 +314,330 @@ public sealed class MacAppController
         });
         PostToUi(new { action = "updateHistory", history = configHistory });
         PostToUi(new { action = "updateSelectedConfig", link = currentConfigLink });
-        PostToUi(new { action = "updateState", state = currentState });
+
+        if (File.Exists(externalCachePath))
+        {
+            try
+            {
+                var cache = JsonNode.Parse(File.ReadAllText(externalCachePath));
+                var checkedAt = cache?["checkedAt"]?.GetValue<DateTimeOffset>();
+                if (checkedAt.HasValue && DateTimeOffset.UtcNow - checkedAt.Value < TimeSpan.FromMinutes(15))
+                {
+                    PostToUi(new { action = "updateExternalConfigs", configs = cache!["configs"], checkedAt });
+                    PostToUi(new { action = "updateExternalStatus", statusText = "Сохранённая проверка: " + checkedAt.Value.ToLocalTime().ToString("HH:mm") });
+                }
+            }
+            catch { }
+        }
+
+        PostToUi(new { action = "updateState", state = isConnected ? "CONNECTED" : "DISCONNECTED" });
     }
 
+    // --- CONNECTION MANAGEMENT ---
     private async Task ConnectAsync()
     {
+        binariesSetupTask ??= CheckAndDownloadBinariesAsync();
+        await binariesSetupTask;
+
         if (string.IsNullOrWhiteSpace(currentConfigLink))
         {
-            PostToUi(new { action = "showToast", message = "Выберите сервер для подключения" });
+            PostToUi(new { action = "showToast", message = "Пожалуйста, выберите или добавьте сервер!" });
             return;
         }
 
+        int gen = Interlocked.Increment(ref connectionGeneration);
+
         currentState = "CONNECTING";
         PostToUi(new { action = "updateState", state = currentState });
-        PostToUi(new { action = "addLog", text = "Подготовка к подключению..." });
+        LogToUi("Инициализация подключения...");
 
         try
         {
-            string parsedConfig = LinkParser.Parse(currentConfigLink, socksPort, httpPort);
+            StopTun2Socks();
+            StopTunnelCore();
+            CleanupRuntimeConfigFiles();
+            MacProxyManager.SetKillSwitchBlocked(false);
+            KillOrphanedProcesses();
+
+            if (!EnsureLocalPortsAvailable())
+            {
+                LogToUi("Не удалось найти свободные локальные порты для прокси.");
+                if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                return;
+            }
+
+            if (gen != connectionGeneration) return;
+
+            string parsedConfig;
+            try
+            {
+                parsedConfig = LinkParser.Parse(currentConfigLink, socksPort, httpPort);
+            }
+            catch (Exception ex)
+            {
+                LogToUi("Ошибка парсинга конфигурации: " + ex.Message);
+                if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                return;
+            }
+
             bool isHysteria = LinkParser.IsHysteria2Config(parsedConfig);
             bool isMieru = LinkParser.IsMieruConfig(parsedConfig);
+            string coreBinaryName = isMieru ? "mieru" : isHysteria ? "hysteria" : "xray";
+            string coreBinaryPath = Path.Combine(binariesDir, coreBinaryName);
 
-            string configFilePath = Path.Combine(appDataDir, "config.json");
-            File.WriteAllText(configFilePath, parsedConfig);
-
-            string coreBinaryName = isHysteria ? "hysteria" : isMieru ? "mieru" : "xray";
-            string coreBinary = Path.Combine(binariesDir, coreBinaryName);
-
-            var startInfo = new System.Diagnostics.ProcessStartInfo
+            if (!File.Exists(coreBinaryPath))
             {
-                FileName = coreBinary,
-                Arguments = isMieru ? $"run -c \"{configFilePath}\"" : isHysteria ? $"-c \"{configFilePath}\"" : $"-c \"{configFilePath}\"",
+                LogToUi($"Модуль ядра {coreBinaryName} не найден по пути {coreBinaryPath}.");
+                if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                return;
+            }
+
+            // Resolve server domain via DoH
+            if (isMieru)
+            {
+                var rawMieruConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                string? host = rawMieruConfig["server_host"]?.ToString();
+                string? port = rawMieruConfig["server_port"]?.ToString();
+                if (!string.IsNullOrEmpty(host))
+                {
+                    string resolvedIp = await ResolveDohAsync(host);
+                    if (gen != connectionGeneration) return;
+                    rawMieruConfig["server"] = $"{resolvedIp}:{port}";
+                    rawMieruConfig["server_host"] = resolvedIp;
+                    parsedConfig = rawMieruConfig.ToJsonString();
+                }
+            }
+            else if (isHysteria)
+            {
+                var rawHysteriaConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                string? host = rawHysteriaConfig["server_host"]?.ToString();
+                string? port = rawHysteriaConfig["server_port"]?.ToString();
+                if (!string.IsNullOrEmpty(host))
+                {
+                    string resolvedIp = await ResolveDohAsync(host);
+                    if (gen != connectionGeneration) return;
+                    rawHysteriaConfig["server"] = $"{resolvedIp}:{port}";
+                    rawHysteriaConfig["server_host"] = resolvedIp;
+                    if (rawHysteriaConfig["sni"] == null || string.IsNullOrEmpty(rawHysteriaConfig["sni"]!.ToString()))
+                    {
+                        rawHysteriaConfig["sni"] = host;
+                    }
+                    parsedConfig = rawHysteriaConfig.ToJsonString();
+                }
+            }
+            else
+            {
+                var xrayConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                if (xrayConfig["log"] == null) xrayConfig["log"] = new JsonObject();
+                xrayConfig["log"]!.AsObject()["loglevel"] = "warning";
+
+                var outbounds = xrayConfig["outbounds"]?.AsArray();
+                if (outbounds != null && outbounds.Count > 0)
+                {
+                    var settings = outbounds[0]?["settings"]?.AsObject();
+                    if (settings != null)
+                    {
+                        if (settings["vnext"] != null && settings["vnext"]!.AsArray().Count > 0)
+                        {
+                            var vnextObj = settings["vnext"]?[0]?.AsObject();
+                            string? host = vnextObj?["address"]?.ToString();
+                            if (vnextObj != null && !string.IsNullOrEmpty(host))
+                            {
+                                string resolvedIp = await ResolveDohAsync(host);
+                                if (gen != connectionGeneration) return;
+                                vnextObj["address"] = resolvedIp;
+                            }
+                        }
+                        else if (settings["servers"] != null && settings["servers"]!.AsArray().Count > 0)
+                        {
+                            var serverObj = settings["servers"]?[0]?.AsObject();
+                            string? host = serverObj?["address"]?.ToString();
+                            if (serverObj != null && !string.IsNullOrEmpty(host))
+                            {
+                                string resolvedIp = await ResolveDohAsync(host);
+                                if (gen != connectionGeneration) return;
+                                serverObj["address"] = resolvedIp;
+                            }
+                        }
+                    }
+                }
+                parsedConfig = xrayConfig.ToJsonString();
+            }
+
+            if (gen != connectionGeneration) return;
+
+            savedServerIp = ExtractServerIp(parsedConfig);
+            var (defaultIface, defaultGw) = MacProxyManager.GetDefaultRouteInfo();
+            activePhysicalInterfaceName = defaultIface;
+            savedDefaultGateway = defaultGw;
+
+            string configFilePath = Path.Combine(appDataDir,
+                isMieru ? "mieru_config.json" : isHysteria ? "hysteria_config.json" : "xray_config.json");
+
+            if (isMieru)
+            {
+                var rawMieruConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                string host = rawMieruConfig["server_host"]?.ToString() ?? "";
+                bool isIp = IPAddress.TryParse(host, out _);
+                var profile = new JsonObject
+                {
+                    ["profileName"] = "default",
+                    ["user"] = new JsonObject
+                    {
+                        ["name"] = rawMieruConfig["username"]?.ToString(),
+                        ["password"] = rawMieruConfig["password"]?.ToString()
+                    },
+                    ["servers"] = new JsonArray(new JsonObject
+                    {
+                        ["ipAddress"] = isIp ? host : "",
+                        ["domainName"] = isIp ? "" : host,
+                        ["portBindings"] = new JsonArray(new JsonObject
+                        {
+                            ["port"] = rawMieruConfig["server_port"]?.AsValue().GetValue<int>() ?? 443,
+                            ["protocol"] = (rawMieruConfig["transport"]?.ToString() ?? "TCP").ToUpperInvariant()
+                        })
+                    }),
+                    ["mtu"] = 1350,
+                    ["multiplexing"] = new JsonObject
+                    {
+                        ["level"] = (rawMieruConfig["multiplexing"]?.ToString() ?? "MULTIPLEXING_LOW").ToUpperInvariant()
+                    },
+                    ["handshakeMode"] = "HANDSHAKE_STANDARD"
+                };
+
+                var mieruConfig = new JsonObject
+                {
+                    ["profiles"] = new JsonArray(profile),
+                    ["activeProfile"] = "default",
+                    ["rpcPort"] = 20810,
+                    ["socks5Port"] = socksPort,
+                    ["socks5ListenLAN"] = false,
+                    ["loggingLevel"] = "INFO"
+                };
+                File.WriteAllText(configFilePath, mieruConfig.ToJsonString());
+            }
+            else if (isHysteria)
+            {
+                var rawHysteriaConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+                var hysteriaConfig = new JsonObject
+                {
+                    ["server"] = rawHysteriaConfig["server"]?.ToString(),
+                    ["auth"] = rawHysteriaConfig["auth"]?.ToString(),
+                    ["socks5"] = new JsonObject { ["listen"] = $"127.0.0.1:{socksPort}" },
+                    ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpPort}" },
+                    ["logger"] = new JsonObject { ["level"] = "warn" }
+                };
+
+                if (rawHysteriaConfig["sni"] != null)
+                {
+                    var tlsConfig = new JsonObject
+                    {
+                        ["sni"] = rawHysteriaConfig["sni"]?.ToString(),
+                        ["insecure"] = rawHysteriaConfig["insecure"]?.AsValue().GetValue<bool>() ?? false
+                    };
+                    var alpn = rawHysteriaConfig["alpn"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(alpn))
+                    {
+                        tlsConfig["alpn"] = new JsonArray(alpn
+                            .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                            .Select(v => JsonValue.Create(v.Trim()))
+                            .ToArray());
+                    }
+                    hysteriaConfig["tls"] = tlsConfig;
+                }
+
+                if (rawHysteriaConfig["obfs_type"]?.ToString() == "salamander")
+                {
+                    hysteriaConfig["obfs"] = new JsonObject
+                    {
+                        ["type"] = "salamander",
+                        ["salamander"] = new JsonObject
+                        {
+                            ["password"] = rawHysteriaConfig["obfs_password"]?.ToString() ?? ""
+                        }
+                    };
+                }
+                File.WriteAllText(configFilePath, hysteriaConfig.ToJsonString());
+            }
+            else
+            {
+                File.WriteAllText(configFilePath, parsedConfig);
+            }
+
+            if (gen != connectionGeneration) return;
+
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = coreBinaryPath,
+                Arguments = isMieru ? "run" : isHysteria ? $"-c \"{configFilePath}\" client" : $"-c \"{configFilePath}\"",
+                WorkingDirectory = binariesDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
-                CreateNoWindow = true
+                CreateNoWindow = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             };
-
-            coreManager.Start(startInfo,
-                outLine => PostToUi(new { action = "addLog", text = outLine }),
-                errLine => PostToUi(new { action = "addLog", text = $"[err] {errLine}" })
-            );
-
-            await Task.Delay(1000);
-
-            if (systemProxy)
+            startInfo.Environment["GOMEMLIMIT"] = "50MiB";
+            startInfo.Environment["GOGC"] = "30";
+            if (isMieru)
             {
-                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan);
-                MacNetworkStateGuard.RecordSession(true, killSwitch, MacProxyManager.GetActiveService());
+                startInfo.Environment["MIERU_CONFIG_JSON_FILE"] = configFilePath;
             }
 
+            LogToUi($"Запуск ядра: {coreBinaryName}...");
+            coreProcess = coreManager.Start(startInfo, LogToUi, LogToUi);
+
+            await Task.Delay(1500);
+            if (gen != connectionGeneration) return;
+
+            if (coreProcess.HasExited)
+            {
+                LogToUi("Процесс ядра неожиданно завершился.");
+                PostToUi(new { action = "updateState", state = "ERROR" });
+                return;
+            }
+
+            if (vpnMode)
+            {
+                LogToUi("Запуск VPN-туннеля (TUN)...");
+                bool tunStarted = await StartTun2SocksAsync();
+                if (gen != connectionGeneration) return;
+
+                if (!tunStarted)
+                {
+                    StopTun2Socks();
+                    LogToUi("Не удалось запустить VPN-туннель.");
+                    StopTunnelCore();
+                    PostToUi(new { action = "updateState", state = "ERROR" });
+                    return;
+                }
+            }
+            else if (systemProxy)
+            {
+                LogToUi("Настройка системного прокси macOS...");
+                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan);
+            }
+
+            MacNetworkStateGuard.RecordSession(
+                proxyActive: systemProxy && !vpnMode,
+                killSwitchActive: killSwitch,
+                service: MacProxyManager.GetActiveService(),
+                tunRoutesActive: tunRoutesActive,
+                serverIp: savedServerIp);
+
+            isConnected = true;
+            reconnectAttempts = 0;
             currentState = "CONNECTED";
             connectionStartTime = DateTime.UtcNow;
+            totalUploadBytes = 0;
+            totalDownloadBytes = 0;
+            statsService.Reset();
+
             PostToUi(new { action = "updateState", state = currentState });
             PostToUi(new { action = "showToast", message = "Подключено!" });
+            LogToUi("Подключение установлено успешно!");
 
-            statsService.Reset();
             statsTimer?.Dispose();
             statsTimer = new System.Threading.Timer(_ => UpdateStatsTick(), null, 1000, 1000);
 
@@ -301,24 +646,42 @@ public sealed class MacAppController
         catch (Exception ex)
         {
             currentState = "ERROR";
-            PostToUi(new { action = "updateState", state = currentState });
-            PostToUi(new { action = "addLog", text = $"Ошибка подключения: {ex.Message}" });
+            LogToUi($"Ошибка подключения: {ex.Message}");
             Disconnect(preserveKillSwitch: false);
+            if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
         }
     }
 
     private void Disconnect(bool preserveKillSwitch)
     {
-        coreManager.Stop();
+        Interlocked.Increment(ref connectionGeneration);
+        if (!preserveKillSwitch)
+        {
+            reconnectCts?.Cancel();
+            reconnectInProgress = false;
+        }
+
         statsTimer?.Dispose();
         statsTimer = null;
+
+        string? lastServerIp = savedServerIp;
+        StopTun2Socks();
+        StopTunnelCore();
+        CleanupRuntimeConfigFiles();
 
         if (systemProxy)
         {
             MacProxyManager.SetProxy(false);
         }
 
-        if (!preserveKillSwitch)
+        if (preserveKillSwitch && killSwitch)
+        {
+            if (MacProxyManager.SetKillSwitchBlocked(true, lastServerIp))
+            {
+                LogToUi("Kill Switch активирован: интернет заблокирован до восстановления VPN.");
+            }
+        }
+        else
         {
             MacProxyManager.SetKillSwitchBlocked(false);
             MacNetworkStateGuard.ClearSession();
@@ -327,144 +690,815 @@ public sealed class MacAppController
         currentState = "DISCONNECTED";
         PostToUi(new { action = "updateState", state = currentState });
         PostToUi(new { action = "updateStats", uploadSpeed = 0L, downloadSpeed = 0L, totalUpload = 0L, totalDownload = 0L, duration = 0L });
+        LogToUi("Соединение разорвано.");
     }
 
-    private void UpdateStatsTick()
+    private void StopTunnelCore()
     {
-        try
+        coreManager.Stop();
+        coreProcess = null;
+        isConnected = false;
+    }
+
+    // --- TUN2SOCKS FOR MACOS ---
+    private async Task<bool> StartTun2SocksAsync()
+    {
+        string tunExe = Path.Combine(binariesDir, "tun2socks");
+        if (!File.Exists(tunExe))
         {
-            var duration = (long)(DateTime.UtcNow - connectionStartTime).TotalSeconds;
-            var sample = statsService.Update(0, 0); // Polling deltas
-            PostToUi(new
-            {
-                action = "updateStats",
-                uploadSpeed = sample.UploadSpeed,
-                downloadSpeed = sample.DownloadSpeed,
-                totalUpload = sample.TotalUpload,
-                totalDownload = sample.TotalDownload,
-                duration
-            });
+            LogToUi("Модуль tun2socks не найден.");
+            return false;
         }
-        catch { }
-    }
 
-    private async Task FetchExitIpInfoAsync()
-    {
         try
         {
-            var handler = new HttpClientHandler
+            const string utunName = "utun85";
+            var psi = new ProcessStartInfo
             {
-                Proxy = new System.Net.WebProxy($"socks5://127.0.0.1:{socksPort}"),
-                UseProxy = true
+                FileName = tunExe,
+                Arguments = $"-device tun://{utunName} -proxy socks5://127.0.0.1:{socksPort} -loglevel warn",
+                WorkingDirectory = binariesDir,
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                StandardOutputEncoding = Encoding.UTF8,
+                StandardErrorEncoding = Encoding.UTF8
             };
-            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(8) };
-            var json = await client.GetStringAsync("https://ipwho.is/");
-            var doc = JsonNode.Parse(json);
-            if (doc != null && doc["ip"] != null)
+            psi.Environment["GOMEMLIMIT"] = "30MiB";
+            psi.Environment["GOGC"] = "30";
+
+            tun2socksProcess = new Process { StartInfo = psi, EnableRaisingEvents = true };
+            tun2socksProcess.OutputDataReceived += (s, ev) => { if (ev.Data != null) LogToUi("[tun] " + ev.Data); };
+            tun2socksProcess.ErrorDataReceived += (s, ev) => { if (ev.Data != null) LogToUi("[tun] " + ev.Data); };
+            tun2socksProcess.Start();
+            tun2socksProcess.BeginOutputReadLine();
+            tun2socksProcess.BeginErrorReadLine();
+
+            await Task.Delay(1500);
+            if (tun2socksProcess.HasExited)
             {
-                string ip = doc["ip"]?.ToString() ?? "";
-                string country = doc["country"]?.ToString() ?? "";
-                string city = doc["city"]?.ToString() ?? "";
-                string flag = doc["country_code"]?.ToString() ?? "";
-                PostToUi(new { action = "updateExitIp", ip, country, city, flag });
+                LogToUi("Для запуска TUN-интерфейса на macOS требуются права администратора (или используйте режим Системного прокси).");
+                return false;
+            }
+
+            if (!MacProxyManager.ConfigureTunRoutes(utunName, savedServerIp, savedDefaultGateway))
+            {
+                LogToUi("Не удалось настроить маршруты TUN-интерфейса.");
+                return false;
+            }
+
+            tunRoutesActive = true;
+            LogToUi("VPN-туннель (utun85) активирован.");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogToUi("Ошибка запуска tun2socks: " + ex.Message);
+            return false;
+        }
+    }
+
+    private void StopTun2Socks()
+    {
+        var proc = tun2socksProcess;
+        try
+        {
+            if (tunRoutesActive)
+            {
+                MacProxyManager.CleanupTunRoutes(savedServerIp);
+                tunRoutesActive = false;
+            }
+
+            if (proc != null && !proc.HasExited)
+            {
+                proc.Kill(true);
+                proc.WaitForExit(3000);
             }
         }
         catch { }
+        finally
+        {
+            if (tun2socksProcess == proc) tun2socksProcess = null;
+            proc?.Dispose();
+            savedServerIp = null;
+            savedDefaultGateway = null;
+        }
+    }
+
+    // --- TRAFFIC STATISTICS & HEALTH MONITOR ---
+    private void UpdateStatsTick()
+    {
+        if (!isConnected) return;
+
+        if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode && tun2socksProcess != null))
+        {
+            LogToUi("VPN-ядро неожиданно завершилось.");
+            Disconnect(preserveKillSwitch: true);
+            ScheduleReconnect();
+            return;
+        }
+
+        try
+        {
+            var allNics = NetworkInterface.GetAllNetworkInterfaces();
+            var targetNic = allNics.FirstOrDefault(n =>
+                n.Name.Equals("utun85", StringComparison.OrdinalIgnoreCase) &&
+                n.OperationalStatus == OperationalStatus.Up);
+
+            if (targetNic == null && !string.IsNullOrEmpty(activePhysicalInterfaceName))
+            {
+                targetNic = allNics.FirstOrDefault(n =>
+                    string.Equals(n.Name, activePhysicalInterfaceName, StringComparison.OrdinalIgnoreCase) &&
+                    n.OperationalStatus == OperationalStatus.Up);
+            }
+
+            if (targetNic != null)
+            {
+                var stats = targetNic.GetIPStatistics();
+                var snapshot = statsService.Update(stats.BytesSent, stats.BytesReceived);
+                currentUploadSpeed = snapshot.UploadSpeed;
+                currentDownloadSpeed = snapshot.DownloadSpeed;
+            }
+            else
+            {
+                currentUploadSpeed = 0;
+                currentDownloadSpeed = 0;
+            }
+        }
+        catch
+        {
+            currentUploadSpeed = 0;
+            currentDownloadSpeed = 0;
+        }
+
+        totalUploadBytes += currentUploadSpeed;
+        totalDownloadBytes += currentDownloadSpeed;
+        var duration = (long)(DateTime.UtcNow - connectionStartTime).TotalSeconds;
+
+        PostToUi(new
+        {
+            action = "updateStats",
+            uploadSpeed = (long)currentUploadSpeed,
+            downloadSpeed = (long)currentDownloadSpeed,
+            totalUpload = (long)totalUploadBytes,
+            totalDownload = (long)totalDownloadBytes,
+            duration
+        });
+    }
+
+    private void ScheduleReconnect()
+    {
+        if (!autoreconnect || reconnectInProgress || string.IsNullOrWhiteSpace(currentConfigLink)) return;
+        if (reconnectAttempts >= 3)
+        {
+            LogToUi("Автопереподключение остановлено после 3 попыток.");
+            return;
+        }
+
+        reconnectAttempts++;
+        reconnectInProgress = true;
+        reconnectCts?.Cancel();
+        reconnectCts = new CancellationTokenSource();
+        var token = reconnectCts.Token;
+        int delaySeconds = (int)Math.Pow(2, reconnectAttempts);
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(delaySeconds), token);
+                reconnectInProgress = false;
+                if (!token.IsCancellationRequested && !isConnected)
+                {
+                    await ConnectAsync();
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex) { LogToUi("Ошибка автопереподключения: " + ex.Message); }
+            finally { reconnectInProgress = false; }
+        });
+        LogToUi($"Автопереподключение через {delaySeconds} с (попытка {reconnectAttempts}/3).");
+    }
+
+    // --- EXIT IP CHECKER ---
+    private async Task FetchExitIpInfoAsync()
+    {
+        var handler = new HttpClientHandler
+        {
+            Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}"),
+            UseProxy = true
+        };
+
+        using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(6) };
+        try
+        {
+            var json = await client.GetStringAsync("https://ipwho.is/");
+            var data = JsonNode.Parse(json);
+            if (data != null && data["success"]?.GetValue<bool>() != false)
+            {
+                var exitIp = new
+                {
+                    ip = data["ip"]?.ToString() ?? data["query"]?.ToString(),
+                    country = data["country"]?.ToString(),
+                    countryCode = data["country_code"]?.ToString() ?? data["countryCode"]?.ToString(),
+                    city = data["city"]?.ToString()
+                };
+                PostToUi(new { action = "updateExitIp", exitIp });
+                return;
+            }
+        }
+        catch { }
+
+        try
+        {
+            var json = await client.GetStringAsync("http://ip-api.com/json");
+            var data = JsonNode.Parse(json);
+            var exitIp = new
+            {
+                ip = data?["query"]?.ToString(),
+                country = data?["country"]?.ToString(),
+                countryCode = data?["countryCode"]?.ToString(),
+                city = data?["city"]?.ToString()
+            };
+            PostToUi(new { action = "updateExitIp", exitIp });
+        }
+        catch (Exception ex)
+        {
+            LogToUi("Не удалось получить информацию об IP: " + ex.Message);
+        }
+    }
+
+    // --- DOH RESOLUTION ---
+    private async Task<string> ResolveDohAsync(string hostname)
+    {
+        if (string.IsNullOrEmpty(hostname)) return hostname;
+
+        if (IPAddress.TryParse(hostname, out var literalAddress))
+        {
+            if (literalAddress.AddressFamily != AddressFamily.InterNetwork)
+            {
+                throw new InvalidOperationException($"IPv6-адрес {hostname} не поддерживается. Используйте IPv4-конфиг.");
+            }
+            return hostname;
+        }
+
+        LogToUi($"Разрешение адреса {hostname} через DoH...");
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://1.1.1.1/dns-query?name={Uri.EscapeDataString(hostname)}&type=A");
+            request.Headers.Accept.Clear();
+            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/dns-json"));
+            using var response = await DnsOverHttpsClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("Answer", out var answerProp) && answerProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var element in answerProp.EnumerateArray())
+                    {
+                        if (element.TryGetProperty("type", out var typeProp) && typeProp.GetInt32() == 1 &&
+                            element.TryGetProperty("data", out var dataProp))
+                        {
+                            string ip = dataProp.GetString() ?? "";
+                            if (IPAddress.TryParse(ip, out var parsedIp) && parsedIp.AddressFamily == AddressFamily.InterNetwork)
+                            {
+                                LogToUi($"Адрес {hostname} разрешён: {ip}");
+                                return ip;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogToUi($"DoH ошибка разрешения для {hostname}: {ex.Message}. Переход к резервному серверу.");
+        }
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://8.8.8.8/resolve?name={Uri.EscapeDataString(hostname)}&type=A");
+            request.Headers.Accept.Clear();
+            request.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+            using var response = await DnsOverHttpsClient.SendAsync(request);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("Answer", out var answerProp) && answerProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var element in answerProp.EnumerateArray())
+                    {
+                        if (element.TryGetProperty("type", out var typeProp) && typeProp.GetInt32() == 1 &&
+                            element.TryGetProperty("data", out var dataProp))
+                        {
+                            string ip = dataProp.GetString() ?? "";
+                            if (IPAddress.TryParse(ip, out var parsedIp) && parsedIp.AddressFamily == AddressFamily.InterNetwork)
+                            {
+                                LogToUi($"Адрес {hostname} разрешён через Google DoH: {ip}");
+                                return ip;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            LogToUi($"Google DoH ошибка разрешения для {hostname}: {ex.Message}");
+        }
+
+        throw new InvalidOperationException($"Не удалось разрешить {hostname} через защищённый DoH.");
+    }
+
+    // --- PING & EXTERNAL SCANNING ---
+    private async Task<long> MeasurePingAsync(string link)
+    {
+        try
+        {
+            var config = JsonNode.Parse(LinkParser.Parse(link))!.AsObject();
+            if (LinkParser.IsHysteria2Config(config.ToJsonString())) return 0;
+            string host;
+            int port;
+            if (LinkParser.IsMieruConfig(config.ToJsonString()))
+            {
+                if (!string.Equals(config["transport"]?.ToString(), "TCP", StringComparison.OrdinalIgnoreCase)) return 0;
+                host = config["server_host"]!.ToString();
+                port = config["server_port"]!.GetValue<int>();
+            }
+            else
+            {
+                var settings = config["outbounds"]![0]!["settings"]!;
+                var server = (settings["vnext"] ?? settings["servers"])![0]!;
+                host = server["address"]!.ToString();
+                port = server["port"]!.GetValue<int>();
+            }
+            var timer = Stopwatch.StartNew();
+            using var socket = new TcpClient();
+            using var timeout = new CancellationTokenSource(2500);
+            await socket.ConnectAsync(host, port, timeout.Token);
+            return timer.ElapsedMilliseconds;
+        }
+        catch
+        {
+            return -1;
+        }
+    }
+
+    private async Task<ServerProbeResult> VerifyProxyTrafficAsync(string link)
+    {
+        if (isConnected) return new(ProbeStatus.Busy);
+        await validationSlots.WaitAsync();
+        try
+        {
+            binariesSetupTask ??= CheckAndDownloadBinariesAsync();
+            await binariesSetupTask;
+            if (isConnected) return new(ProbeStatus.Busy);
+            return await new ServerProbe(binariesDir, appDataDir).CheckAsync(link);
+        }
+        finally
+        {
+            validationSlots.Release();
+        }
     }
 
     private async Task CheckPingAsync(string link)
     {
         PostToUi(new { action = "updatePingLoading", link, loading = true });
-        try
-        {
-            var probe = new ServerProbe(binariesDir, Path.Combine(appDataDir, "temp"));
-            var result = await probe.CheckAsync(link);
-            PostToUi(new { action = "updatePing", link, ping = result.Latency, status = result.Status.ToString() });
-        }
-        catch
-        {
-            PostToUi(new { action = "updatePing", link, ping = -1, status = "Error" });
-        }
-        finally
-        {
-            PostToUi(new { action = "updatePingLoading", link, loading = false });
-        }
+        var result = await VerifyProxyTrafficAsync(link);
+        PostToUi(new { action = "updatePing", link, latency = result.Latency, verificationStatus = result.Label });
     }
 
     private async Task CheckAllPingsAsync()
     {
-        foreach (var link in configHistory)
-        {
-            await CheckPingAsync(link);
-        }
+        var tasks = configHistory.Select(CheckPingAsync).ToArray();
+        await Task.WhenAll(tasks);
     }
 
     private async Task ScanExternalSourcesAsync()
     {
+        if (externalScanInProgress) return;
+        if (isConnected)
+        {
+            PostToUi(new { action = "updateExternalStatus", statusText = "Отключите VPN перед проверкой внешнего списка" });
+            return;
+        }
+
+        externalScanInProgress = true;
         externalScanCts?.Cancel();
         externalScanCts = new CancellationTokenSource();
-        var token = externalScanCts.Token;
-
-        PostToUi(new { action = "updateExternalScanning", scanning = true });
-        PostToUi(new { action = "updateExternalStatus", text = "Загрузка внешних списков..." });
+        var scanToken = externalScanCts.Token;
 
         try
         {
+            PostToUi(new { action = "updateExternalScanning", scanning = true });
+            PostToUi(new { action = "updateExternalConfigs", configs = Array.Empty<object>() });
+            PostToUi(new { action = "updateExternalStatus", statusText = "Подготовка VPN-модулей..." });
+
+            binariesSetupTask ??= CheckAndDownloadBinariesAsync();
+            await binariesSetupTask;
+
+            if (!new[] { "xray", "hysteria", "mieru" }.Any(name => File.Exists(Path.Combine(binariesDir, name))))
+            {
+                PostToUi(new { action = "updateExternalStatus", statusText = "Проверка недоступна: VPN-модули не установлены. Подробности в логах." });
+                return;
+            }
+
+            PostToUi(new { action = "updateExternalStatus", statusText = "Загрузка свежих списков GitHub..." });
             string catalogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "external-sources.json");
             var sources = ExternalSources.Load(catalogPath);
-            var loadResult = await ExternalSourceLoader.FetchAsync(sources, log => PostToUi(new { action = "updateExternalStatus", text = log }));
+            var loaded = await ExternalSourceLoader.FetchAsync(sources, LogToUi);
+            var uniqueLinks = loaded.Links;
 
-            PostToUi(new { action = "updateExternalStatus", text = $"Проверка {loadResult.Links.Count} конфигураций..." });
-
-            var probe = new ServerProbe(binariesDir, Path.Combine(appDataDir, "temp"));
-            var scanResult = await ExternalConfigScanner.ScanAsync(
-                loadResult.Links,
-                measurePing: async link =>
-                {
-                    token.ThrowIfCancellationRequested();
-                    var pr = await probe.CheckAsync(link);
-                    return pr.IsUsable ? pr.Latency : -1L;
-                },
-                verifyTraffic: async link =>
-                {
-                    token.ThrowIfCancellationRequested();
-                    return await probe.CheckAsync(link);
-                },
-                onPingProgress: null,
-                onTrafficProgress: null,
-                configBatchSize: 200,
-                trafficBatchSize: 30,
-                onVerified: null,
-                cancellationToken: token
-            );
-
-            PostToUi(new
+            if (uniqueLinks.Count == 0)
             {
-                action = "updateExternalConfigs",
-                configs = scanResult.WorkingConfigs.Select(c => new { link = c.Link, latency = c.Latency, status = c.Status.ToString() })
-            });
+                PostToUi(new { action = "updateExternalConfigs", configs = Array.Empty<object>() });
+                PostToUi(new { action = "updateExternalStatus", statusText = $"Не удалось получить поддерживаемые конфигурации: источников с ошибками {loaded.FailedSources}/{sources.Count}." });
+                return;
+            }
 
-            PostToUi(new { action = "updateExternalStatus", text = $"Найдено рабочих серверов: {scanResult.WorkingConfigs.Count}" });
+            var live = new ConcurrentBag<ExternalScanCandidate>();
+            var scanResult = await ExternalConfigScanner.ScanAsync(
+                uniqueLinks,
+                MeasurePingAsync,
+                VerifyProxyTrafficAsync,
+                checkedCount => PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка конфигураций ({checkedCount}/{uniqueLinks.Count}); источников: {loaded.LoadedSources}/{sources.Count}..." }),
+                trafficCount => PostToUi(new { action = "updateExternalStatus", statusText = $"Проверка HTTPS через VPN (проверено: {trafficCount}, найдено: {live.Count})..." }),
+                configBatchSize: ExternalConfigBatchSize,
+                trafficBatchSize: ExternalTrafficBatchSize,
+                onVerified: candidate =>
+                {
+                    live.Add(candidate);
+                    PostToUi(new
+                    {
+                        action = "updateExternalConfigs",
+                        configs = live.OrderBy(c => c.Latency).Select(c => new
+                        {
+                            link = c.Link,
+                            latency = c.Latency,
+                            verificationStatus = new ServerProbeResult(c.Status).Label,
+                            verifiedAt = c.VerifiedAt
+                        }).ToList()
+                    });
+                },
+                cancellationToken: scanToken);
+
+            var sortedConfigs = scanResult.WorkingConfigs.Select(c => new
+            {
+                link = c.Link,
+                latency = c.Latency,
+                verificationStatus = new ServerProbeResult(c.Status).Label,
+                verifiedAt = c.VerifiedAt
+            }).ToList();
+
+            var checkedAt = scanResult.WorkingConfigs.Select(c => c.VerifiedAt ?? DateTimeOffset.UtcNow).DefaultIfEmpty(DateTimeOffset.UtcNow).Min();
+            try { File.WriteAllText(externalCachePath, JsonSerializer.Serialize(new { checkedAt, configs = sortedConfigs })); } catch { }
+
+            PostToUi(new { action = "updateExternalConfigs", configs = sortedConfigs, checkedAt });
+
+            int full = scanResult.WorkingConfigs.Count(c => c.Status == ProbeStatus.Verified);
+            int partial = scanResult.WorkingConfigs.Count - full;
+            int localErrors = scanResult.ErrorCounts.Where(kv => kv.Key is ProbeStatus.MissingEngine or ProbeStatus.EngineStartFailed or ProbeStatus.Busy).Sum(kv => kv.Value);
+            string status = sortedConfigs.Count > 0 ? $"Трафик подтверждён: {full}, частичная доступность: {partial}"
+                : localErrors > 0 ? $"Трафик не подтверждён; ошибок проверки: {localErrors}."
+                : "Рабочий HTTPS-трафик не подтверждён";
+            PostToUi(new { action = "updateExternalStatus", statusText = status + $" (проверено: {scanResult.TrafficChecks}/{uniqueLinks.Count}; источников: {loaded.LoadedSources}/{sources.Count})" });
         }
         catch (OperationCanceledException)
         {
-            PostToUi(new { action = "updateExternalStatus", text = "Сканирование остановлено пользователем." });
+            LogToUi("Проверка внешних списков остановлена пользователем.");
+            PostToUi(new { action = "updateExternalStatus", statusText = "Проверка остановлена пользователем." });
         }
         catch (Exception ex)
         {
-            PostToUi(new { action = "updateExternalStatus", text = $"Ошибка сканирования: {ex.Message}" });
+            LogToUi("Проверка внешних списков: " + ex.Message);
+            PostToUi(new { action = "updateExternalStatus", statusText = "Ошибка проверки внешних списков. Подробности в логах." });
         }
         finally
         {
+            externalScanInProgress = false;
             PostToUi(new { action = "updateExternalScanning", scanning = false });
         }
     }
 
-    private async Task CheckAndDownloadBinariesAsync()
+    // --- SUBSCRIPTION & CLIPBOARD ---
+    private static async Task<string> GetBoundedTextAsync(HttpClient client, string url)
     {
-        await Task.CompletedTask;
+        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        if (response.Content.Headers.ContentLength > MaxSubscriptionBytes)
+            throw new InvalidDataException("Размер подписки превышает допустимый предел 1 МБ.");
+
+        await using var input = await response.Content.ReadAsStreamAsync();
+        using var output = new MemoryStream();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            int count = await input.ReadAsync(buffer, 0, buffer.Length);
+            if (count == 0) break;
+            if (output.Length + count > MaxSubscriptionBytes)
+                throw new InvalidDataException("Размер подписки превышает допустимый предел 1 МБ.");
+            await output.WriteAsync(buffer, 0, count);
+        }
+        return Encoding.UTF8.GetString(output.ToArray());
     }
 
+    private async Task ImportSubscriptionAsync(string url)
+    {
+        if (string.IsNullOrEmpty(url)) return;
+        LogToUi("Загрузка подписки по ссылке: " + url);
+
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        try
+        {
+            string content = await GetBoundedTextAsync(client, url);
+            var parsedLinks = ExternalSources.ParseSubscription(content);
+            int addedCount = 0;
+
+            foreach (var link in parsedLinks)
+            {
+                if (!configHistory.Contains(link))
+                {
+                    configHistory.Add(link);
+                    addedCount++;
+                }
+            }
+
+            if (addedCount > 0)
+            {
+                SaveHistory();
+                if (string.IsNullOrEmpty(currentConfigLink) && configHistory.Count > 0)
+                {
+                    currentConfigLink = configHistory.First();
+                    SaveSettings();
+                    PostToUi(new { action = "updateSelectedConfig", link = currentConfigLink });
+                }
+                PostToUi(new { action = "updateHistory", history = configHistory });
+                PostToUi(new { action = "showToast", message = $"Импортировано серверов: {addedCount}" });
+            }
+            else
+            {
+                PostToUi(new { action = "showToast", message = "Новых рабочих ссылок не обнаружено" });
+            }
+        }
+        catch (Exception ex)
+        {
+            LogToUi("Ошибка импорта подписки: " + ex.Message);
+            PostToUi(new { action = "showToast", message = "Ошибка загрузки подписки" });
+        }
+    }
+
+    private void PasteFromClipboard()
+    {
+        string? rawText = MacProxyManager.ReadClipboardText();
+        if (string.IsNullOrWhiteSpace(rawText))
+        {
+            PostToUi(new { action = "showToast", message = "Буфер обмена пуст" });
+            return;
+        }
+
+        string text = rawText.Trim();
+        if (text.StartsWith("vless://") || text.StartsWith("vmess://") || text.StartsWith("naive+https://") ||
+            text.StartsWith("hysteria2://") || text.StartsWith("hy2://") || text.StartsWith("mieru://") ||
+            text.StartsWith("mierus://") || text.Contains("type: mieru") || text.Contains("type: \"mieru\"") ||
+            text.Contains("type: 'mieru'"))
+        {
+            if (!configHistory.Contains(text))
+            {
+                configHistory.Insert(0, text);
+                SaveHistory();
+                currentConfigLink = text;
+                SaveSettings();
+                PostToUi(new { action = "updateSelectedConfig", link = currentConfigLink });
+                PostToUi(new { action = "updateHistory", history = configHistory });
+                PostToUi(new { action = "showToast", message = "Конфигурация добавлена!" });
+            }
+            else
+            {
+                currentConfigLink = text;
+                SaveSettings();
+                PostToUi(new { action = "updateSelectedConfig", link = currentConfigLink });
+                PostToUi(new { action = "showToast", message = "Конфигурация выбрана!" });
+            }
+        }
+        else
+        {
+            PostToUi(new { action = "showToast", message = "Неподдерживаемый формат ссылки в буфере обмена" });
+        }
+    }
+
+    // --- BINARY AUTO-DOWNLOADER (SHA-256 VERIFIED) ---
+    private async Task CheckAndDownloadBinariesAsync()
+    {
+        TrustedBinaryManifest manifest;
+        try
+        {
+            manifest = TrustedBinaryManifest.Load(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trusted-binaries.json"));
+        }
+        catch (Exception ex)
+        {
+            LogToUi("Загрузка модулей остановлена: доверенный manifest недоступен: " + ex.Message);
+            PostToUi(new { action = "downloadProgress", downloading = false, progress = 0 });
+            return;
+        }
+
+        bool isX64 = RuntimeInformation.OSArchitecture == Architecture.X64;
+        string suffix = isX64 ? "-x64" : "";
+
+        var xrayArtifact = manifest.GetRequired("xray" + suffix);
+        var hysteriaArtifact = manifest.GetRequired("hysteria" + suffix);
+        var mieruArtifact = manifest.GetRequired("mieru" + suffix);
+        var tun2SocksArtifact = manifest.GetRequired("tun2socks" + suffix);
+        var trustedInstallState = LoadTrustedInstallState();
+
+        string xrayExe = Path.Combine(binariesDir, "xray");
+        string hysteriaExe = Path.Combine(binariesDir, "hysteria");
+        string mieruExe = Path.Combine(binariesDir, "mieru");
+        string tun2socksExe = Path.Combine(binariesDir, "tun2socks");
+
+        bool needsXray = !IsTrustedInstalled("xray", xrayExe, xrayArtifact, trustedInstallState)
+            || !File.Exists(Path.Combine(binariesDir, "geoip.dat"))
+            || !File.Exists(Path.Combine(binariesDir, "geosite.dat"));
+        bool needsHysteria = !IsTrustedInstalled("hysteria", hysteriaExe, hysteriaArtifact, trustedInstallState);
+        bool needsMieru = !IsTrustedInstalled("mieru", mieruExe, mieruArtifact, trustedInstallState);
+        bool needsTun2Socks = !IsTrustedInstalled("tun2socks", tun2socksExe, tun2SocksArtifact, trustedInstallState);
+
+        if (!needsXray && !needsHysteria && !needsMieru && !needsTun2Socks)
+            return;
+
+        PostToUi(new { action = "downloadProgress", downloading = true, progress = 0 });
+        LogToUi("Запуск загрузки недостающих VPN-модулей для macOS...");
+
+        try
+        {
+            int segments = (needsXray ? 1 : 0) + (needsHysteria ? 1 : 0) + (needsMieru ? 1 : 0) + (needsTun2Socks ? 1 : 0);
+            int segSize = 100 / segments;
+            int pos = 0;
+
+            if (needsXray)
+            {
+                LogToUi("Загрузка Xray-core...");
+                string xrayZip = Path.Combine(appDataDir, "xray.zip");
+                await DownloadVerifiedArtifactWithProgressAsync(xrayArtifact, xrayZip, pos, pos + segSize);
+                ZipFile.ExtractToDirectory(xrayZip, binariesDir, true);
+                File.Delete(xrayZip);
+                EnsureExecutablePermission(xrayExe);
+                MarkTrustedInstalled("xray", xrayArtifact, trustedInstallState);
+                SaveTrustedInstallState(trustedInstallState);
+                LogToUi("Xray-core успешно установлен.");
+                pos += segSize;
+            }
+
+            if (needsHysteria)
+            {
+                LogToUi("Загрузка Hysteria2...");
+                await DownloadVerifiedArtifactWithProgressAsync(hysteriaArtifact, hysteriaExe, pos, pos + segSize);
+                EnsureExecutablePermission(hysteriaExe);
+                MarkTrustedInstalled("hysteria", hysteriaArtifact, trustedInstallState);
+                SaveTrustedInstallState(trustedInstallState);
+                LogToUi("Hysteria2 успешно установлен.");
+                pos += segSize;
+            }
+
+            if (needsMieru)
+            {
+                LogToUi("Загрузка Mieru...");
+                string mieruTarGz = Path.Combine(appDataDir, "mieru.tar.gz");
+                await DownloadVerifiedArtifactWithProgressAsync(mieruArtifact, mieruTarGz, pos, pos + segSize);
+                MacProxyManager.RunCommand("/usr/bin/tar", $"-xzf \"{mieruTarGz}\" -C \"{binariesDir}\"");
+                File.Delete(mieruTarGz);
+                EnsureExecutablePermission(mieruExe);
+                MarkTrustedInstalled("mieru", mieruArtifact, trustedInstallState);
+                SaveTrustedInstallState(trustedInstallState);
+                LogToUi("Mieru успешно установлен.");
+                pos += segSize;
+            }
+
+            if (needsTun2Socks)
+            {
+                LogToUi("Загрузка tun2socks...");
+                string tunZip = Path.Combine(appDataDir, "tun2socks.zip");
+                await DownloadVerifiedArtifactWithProgressAsync(tun2SocksArtifact, tunZip, pos, pos + segSize);
+                ZipFile.ExtractToDirectory(tunZip, binariesDir, true);
+                File.Delete(tunZip);
+                string extractedName = isX64 ? "tun2socks-darwin-amd64" : "tun2socks-darwin-arm64";
+                string extractedPath = Path.Combine(binariesDir, extractedName);
+                if (File.Exists(extractedPath))
+                {
+                    File.Move(extractedPath, tun2socksExe, true);
+                }
+                EnsureExecutablePermission(tun2socksExe);
+                MarkTrustedInstalled("tun2socks", tun2SocksArtifact, trustedInstallState);
+                SaveTrustedInstallState(trustedInstallState);
+                LogToUi("tun2socks успешно установлен.");
+            }
+
+            PostToUi(new { action = "downloadProgress", downloading = false, progress = 100 });
+            LogToUi("Установка модулей для macOS полностью завершена!");
+        }
+        catch (Exception ex)
+        {
+            LogToUi("Ошибка скачивания модулей: " + ex.Message);
+            PostToUi(new { action = "downloadProgress", downloading = false, progress = 0 });
+        }
+    }
+
+    private static void EnsureExecutablePermission(string path)
+    {
+        if (!File.Exists(path)) return;
+        MacProxyManager.RunCommand("/bin/chmod", $"+x \"{path}\"");
+    }
+
+    private async Task DownloadVerifiedArtifactWithProgressAsync(
+        TrustedBinaryArtifact artifact,
+        string destination,
+        int startPercentage,
+        int endPercentage)
+    {
+        string temporaryPath = destination + ".part";
+        try
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+            await DownloadFileWithProgressAsync(artifact.Url, temporaryPath, startPercentage, endPercentage);
+            BinaryIntegrity.VerifySha256(temporaryPath, artifact.Sha256);
+            File.Move(temporaryPath, destination, true);
+            LogToUi($"Проверка SHA-256 пройдена: {Path.GetFileName(destination)}");
+        }
+        finally
+        {
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
+        }
+    }
+
+    private async Task DownloadFileWithProgressAsync(string url, string destination, int startPercentage, int endPercentage)
+    {
+        using var handler = new HttpClientHandler { AutomaticDecompression = DecompressionMethods.All };
+        using var client = new HttpClient(handler) { Timeout = BinaryDownloadTimeout };
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("ANARISE-VPN-MacClient/1.4");
+
+        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
+        response.EnsureSuccessStatusCode();
+        var totalBytes = response.Content.Headers.ContentLength ?? -1L;
+        bool canReportProgress = totalBytes > 0;
+
+        await using var fileStream = new FileStream(destination, FileMode.Create, FileAccess.Write, FileShare.None, 8192, true);
+        await using var stream = await response.Content.ReadAsStreamAsync();
+        var buffer = new byte[8192];
+        long totalRead = 0;
+        int bytesRead;
+
+        while ((bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+        {
+            await fileStream.WriteAsync(buffer, 0, bytesRead);
+            totalRead += bytesRead;
+            if (canReportProgress)
+            {
+                double pct = (double)totalRead / totalBytes;
+                int rel = (int)(startPercentage + pct * (endPercentage - startPercentage));
+                PostToUi(new { action = "downloadProgress", downloading = true, progress = rel });
+            }
+        }
+    }
+
+    private Dictionary<string, string> LoadTrustedInstallState()
+    {
+        var path = Path.Combine(appDataDir, "trusted-installation.json");
+        if (!File.Exists(path)) return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(path))
+                ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private static bool IsTrustedInstalled(string name, string outputPath, TrustedBinaryArtifact artifact, IReadOnlyDictionary<string, string> state)
+    {
+        return File.Exists(outputPath)
+            && state.TryGetValue(name, out var installedHash)
+            && installedHash.Equals(artifact.Sha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void MarkTrustedInstalled(string name, TrustedBinaryArtifact artifact, IDictionary<string, string> state)
+    {
+        state[name] = artifact.Sha256;
+    }
+
+    private void SaveTrustedInstallState(IReadOnlyDictionary<string, string> state)
+    {
+        var path = Path.Combine(appDataDir, "trusted-installation.json");
+        var temp = path + ".part";
+        File.WriteAllText(temp, JsonSerializer.Serialize(state));
+        File.Move(temp, path, true);
+    }
+
+    // --- HELPERS & SETTINGS ---
     private void CheckForUpdates()
     {
         if (updateChecked) return;
@@ -491,18 +1525,188 @@ public sealed class MacAppController
         });
     }
 
+    private bool EnsureLocalPortsAvailable()
+    {
+        try
+        {
+            int originalSocks = socksPort;
+            int originalHttp = httpPort;
+
+            if (!IsLocalPortAvailable(socksPort, requireUdp: true))
+            {
+                socksPort = FindAvailableLocalPort(20808, requireUdp: true, excludedPort: httpPort);
+                LogToUi($"SOCKS-порт {originalSocks} занят. Автоматически выбран порт {socksPort}.");
+            }
+
+            if (httpPort == socksPort || !IsLocalPortAvailable(httpPort, requireUdp: false))
+            {
+                httpPort = FindAvailableLocalPort(20809, requireUdp: false, excludedPort: socksPort);
+                LogToUi($"HTTP-порт {originalHttp} занят. Автоматически выбран порт {httpPort}.");
+            }
+
+            if (socksPort != originalSocks || httpPort != originalHttp)
+            {
+                SaveSettings();
+                SendSettingsAndHistory();
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogToUi("Ошибка проверки локальных портов: " + ex.Message);
+            return false;
+        }
+    }
+
+    private static int FindAvailableLocalPort(int preferredPort, bool requireUdp, int excludedPort)
+    {
+        for (int offset = 0; offset < 200; offset++)
+        {
+            int candidate = preferredPort + offset;
+            if (candidate > 65535 || candidate == excludedPort) continue;
+            if (IsLocalPortAvailable(candidate, requireUdp)) return candidate;
+        }
+        throw new InvalidOperationException("No free local proxy port was found.");
+    }
+
+    private static bool IsLocalPortAvailable(int port, bool requireUdp)
+    {
+        if (port < 1 || port > 65535) return false;
+        try
+        {
+            using var tcpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            tcpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+            if (requireUdp)
+            {
+                using var udpSocket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp);
+                udpSocket.Bind(new IPEndPoint(IPAddress.Loopback, port));
+            }
+            return true;
+        }
+        catch (SocketException)
+        {
+            return false;
+        }
+    }
+
+    private static string? ExtractServerIp(string configJson)
+    {
+        try
+        {
+            var doc = JsonNode.Parse(configJson);
+            var protocol = doc?["_protocol"]?.ToString();
+            if (protocol == LinkParser.PROTOCOL_HYSTERIA2 || protocol == LinkParser.PROTOCOL_MIERU)
+            {
+                string? server = doc?["server_host"]?.ToString() ?? doc?["server"]?.ToString();
+                if (!string.IsNullOrEmpty(server))
+                {
+                    int colonIdx = server.LastIndexOf(':');
+                    if (colonIdx > 0) server = server.Substring(0, colonIdx);
+                    if (IPAddress.TryParse(server, out _)) return server;
+                }
+            }
+            else
+            {
+                var outbounds = doc?["outbounds"]?.AsArray();
+                if (outbounds != null && outbounds.Count > 0)
+                {
+                    var settings = outbounds[0]?["settings"];
+                    string? address = settings?["vnext"]?[0]?["address"]?.ToString()
+                                   ?? settings?["servers"]?[0]?["address"]?.ToString();
+                    if (!string.IsNullOrEmpty(address) && IPAddress.TryParse(address, out _))
+                    {
+                        return address;
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    private void KillOrphanedProcesses()
+    {
+        try
+        {
+            string[] names = { "xray", "tun2socks", "hysteria", "mieru" };
+            foreach (var name in names)
+            {
+                foreach (var proc in Process.GetProcessesByName(name))
+                {
+                    try
+                    {
+                        string? modPath = null;
+                        try { modPath = proc.MainModule?.FileName; } catch { }
+                        if (modPath != null && modPath.StartsWith(binariesDir, StringComparison.OrdinalIgnoreCase))
+                        {
+                            proc.Kill(true);
+                            proc.WaitForExit(2000);
+                        }
+                    }
+                    catch { }
+                    finally { proc.Dispose(); }
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void CleanupRuntimeConfigFiles()
+    {
+        foreach (var fileName in new[] { "config.json", "xray_config.json", "hysteria_config.json", "mieru_config.json" })
+        {
+            try
+            {
+                var path = Path.Combine(appDataDir, fileName);
+                if (File.Exists(path)) File.Delete(path);
+            }
+            catch { }
+        }
+    }
+
     private void UpdateSetting(string name, JsonNode val)
     {
         switch (name)
         {
-            case "killSwitch": killSwitch = val.GetValue<bool>(); break;
-            case "autostart": autostart = val.GetValue<bool>(); break;
-            case "autoreconnect": autoreconnect = val.GetValue<bool>(); break;
-            case "bypassLan": bypassLan = val.GetValue<bool>(); break;
-            case "systemProxy": systemProxy = val.GetValue<bool>(); break;
-            case "vpnMode": vpnMode = val.GetValue<bool>(); break;
-            case "socksPort": socksPort = val.GetValue<int>(); break;
-            case "httpPort": httpPort = val.GetValue<int>(); break;
+            case "killSwitch":
+                killSwitch = val.GetValue<bool>();
+                if (!killSwitch)
+                {
+                    MacProxyManager.SetKillSwitchBlocked(false);
+                }
+                break;
+            case "autostart":
+                autostart = val.GetValue<bool>();
+                MacProxyManager.SetAutostartLaunchAgent(autostart);
+                break;
+            case "autoreconnect":
+                autoreconnect = val.GetValue<bool>();
+                break;
+            case "bypassLan":
+                bypassLan = val.GetValue<bool>();
+                if (isConnected && !vpnMode && systemProxy)
+                {
+                    MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan);
+                }
+                break;
+            case "systemProxy":
+                systemProxy = val.GetValue<bool>();
+                if (isConnected && !vpnMode)
+                {
+                    MacProxyManager.SetProxy(systemProxy, socksPort, httpPort, bypassLan);
+                }
+                break;
+            case "vpnMode":
+                vpnMode = val.GetValue<bool>();
+                break;
+            case "socksPort":
+                int sp = val.GetValue<int>();
+                if (sp >= 1 && sp <= 65535) socksPort = sp;
+                break;
+            case "httpPort":
+                int hp = val.GetValue<int>();
+                if (hp >= 1 && hp <= 65535) httpPort = hp;
+                break;
         }
         SaveSettings();
     }
@@ -518,7 +1722,7 @@ public sealed class MacAppController
                 {
                     killSwitch = doc["killSwitch"]?.GetValue<bool>() ?? false;
                     autostart = doc["autostart"]?.GetValue<bool>() ?? false;
-                    autoreconnect = doc["autoreconnect"]?.GetValue<bool>() ?? false;
+                    autoreconnect = doc["autoreconnect"]?.GetValue<bool>() ?? true;
                     bypassLan = doc["bypassLan"]?.GetValue<bool>() ?? true;
                     systemProxy = doc["systemProxy"]?.GetValue<bool>() ?? true;
                     vpnMode = doc["vpnMode"]?.GetValue<bool>() ?? false;

@@ -31,6 +31,13 @@ if (args.Contains("--validate-manifest", StringComparer.OrdinalIgnoreCase))
     var manifestPath = FindManifestPath();
     _ = TrustedBinaryManifest.Load(manifestPath);
     Console.WriteLine($"Trusted binary manifest valid: {manifestPath}");
+
+    var macManifestPath = Path.Combine(Path.GetDirectoryName(Path.GetDirectoryName(manifestPath)!)!, "macos", "trusted-binaries.json");
+    if (File.Exists(macManifestPath))
+    {
+        _ = TrustedBinaryManifest.Load(macManifestPath);
+        Console.WriteLine($"macOS trusted binary manifest valid: {macManifestPath}");
+    }
     return 0;
 }
 

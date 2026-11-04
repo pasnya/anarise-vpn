@@ -4,17 +4,33 @@
       "url": "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-macos-arm64-v8a.zip",
       "sha256": "61f8f74d099098af710fa43613d9934d97b901dee909801d34f496cd463956d1"
     },
+    "xray-x64": {
+      "url": "https://github.com/XTLS/Xray-core/releases/download/v26.7.11/Xray-macos-64.zip",
+      "sha256": "d8c116756d3a88a38a833a94bdf8bc801f69243ee888befcb56df8b4f1ec4878"
+    },
     "hysteria": {
       "url": "https://github.com/HyNetworks/hysteria/releases/download/app/v2.12.1/hysteria-darwin-arm64",
       "sha256": "dd5065293acea1cd961b452c6c7b58217cd1056496d7616f5a005a1d38d91c40"
     },
+    "hysteria-x64": {
+      "url": "https://github.com/HyNetworks/hysteria/releases/download/app/v2.12.1/hysteria-darwin-amd64",
+      "sha256": "d39e97d35be13972ead35103ce8da63fefbdf1b67278a5e18415f60701d4b401"
+    },
     "mieru": {
-      "url": "https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_darwin_arm64.tar.gz",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "url": "https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_macos_arm64.tar.gz",
+      "sha256": "74ea98a353bb1336a269f73a55265db9249175010bba93b34bc41c9162147488"
+    },
+    "mieru-x64": {
+      "url": "https://github.com/enfein/mieru/releases/download/v3.34.0/mieru_3.34.0_macos_amd64.tar.gz",
+      "sha256": "98e60f8a5c42931c405b036ff2c9f94f2a2a647356816b9941a0b4438d280c00"
     },
     "tun2socks": {
       "url": "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-darwin-arm64.zip",
-      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      "sha256": "4d7138111f3a35866d93551d6d2894bba3ba40223c01e4e2c5870bb61ebeb71e"
+    },
+    "tun2socks-x64": {
+      "url": "https://github.com/xjasonlyu/tun2socks/releases/download/v2.6.0/tun2socks-darwin-amd64.zip",
+      "sha256": "4cf19ab928e36ced549c52be78d1d2dd0bb52f6cd77f6475e25bfa1c7c3327c1"
     }
   }
 }
