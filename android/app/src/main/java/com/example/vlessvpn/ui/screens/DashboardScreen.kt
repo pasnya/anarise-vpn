@@ -1,4 +1,4 @@
-package com.example.vlessvpn.ui.screens
+﻿package com.example.vlessvpn.ui.screens
 
 import android.app.Activity
 import android.widget.Toast
@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
@@ -250,47 +251,200 @@ fun DashboardScreen(
         }
 
         item {
-            Spacer(modifier = Modifier.height(8.dp))
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
-                shape = RoundedCornerShape(18.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.16f))
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Zen status badge & title
+            Surface(
+                shape = RoundedCornerShape(50),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                modifier = Modifier.padding(horizontal = 16.dp)
             ) {
-                Box(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("ВАШЕ ПОДКЛЮЧЕНИЕ", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Подключитесь к VPN", color = MaterialTheme.colorScheme.onBackground, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
-                        Text("Нажмите на сервер в списке, чтобы подключиться, или добавьте свой.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
-                    }
+                Row(
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .background(
+                                color = when (state) {
+                                    VyomState.CONNECTED -> MaterialTheme.colorScheme.primary
+                                    VyomState.CONNECTING -> Color(0xFFD9822B)
+                                    VyomState.ERROR -> Color(0xFFB84B4B)
+                                    else -> Color(0xFF8B9992)
+                                },
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = when (state) {
+                            VyomState.CONNECTED -> "Подключено"
+                            VyomState.CONNECTING -> "Подключение..."
+                            VyomState.ERROR -> "Ошибка"
+                            else -> "Отключено"
+                        },
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
-        }
 
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             Text(
                 text = when (state) {
-                    VyomState.CONNECTED -> "Соединение включено · туннель работает"
-                    VyomState.CONNECTING -> "Подключаемся · устанавливаем соединение"
-                    VyomState.DISCONNECTED -> "Соединение выключено · интернет работает напрямую"
-                    VyomState.ERROR -> "Не удалось подключиться · попробуйте другой сервер"
-                    else -> "Ожидание"
+                    VyomState.CONNECTED -> "Вы защищены"
+                    VyomState.CONNECTING -> "Подключаемся..."
+                    VyomState.ERROR -> "Ошибка подключения"
+                    else -> "Защита выключена"
                 },
-                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            val selectedConfigLabel = if (vlessLink.isNotBlank()) {
+                getDisplayLabel(vlessLink)
+            } else {
+                "Сервер не выбран"
+            }
+
+            Text(
+                text = when (state) {
+                    VyomState.CONNECTED -> selectedConfigLabel
+                    VyomState.CONNECTING -> "Шифрование канала связи"
+                    VyomState.ERROR -> "Попробуйте другой сервер"
+                    else -> "Интернет работает напрямую"
+                },
+                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
 
         item {
             Spacer(modifier = Modifier.height(24.dp))
 
+            // Large Circular Power Button
+            val isConnecting = state == VyomState.CONNECTING
+            Surface(
+                onClick = {
+                    if (isConnected) {
+                        viewModel.disconnect()
+                    } else {
+                        activity?.let { viewModel.connect(it) }
+                    }
+                },
+                modifier = Modifier.size(136.dp),
+                shape = CircleShape,
+                color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                border = BorderStroke(
+                    width = 2.dp,
+                    color = if (isConnected) MaterialTheme.colorScheme.primary else if (isConnecting) Color(0xFFD9822B) else MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
+                ),
+                shadowElevation = if (isConnected) 8.dp else 4.dp
+            ) {
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_power),
+                        contentDescription = "Power",
+                        tint = if (isConnected) Color.White else MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(44.dp)
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = if (isConnected) "Отключить" else if (isConnecting) "Прервать" else "Подключиться",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isConnected) Color.White else MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(20.dp))
+
+            val selectedConfigLabel = if (vlessLink.isNotBlank()) {
+                getDisplayLabel(vlessLink)
+            } else {
+                "Сервер не выбран"
+            }
+
+            // Active Server Selector Card
+            Card(
+                onClick = { selectedTab = 0 },
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    contentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(38.dp)
+                            .background(
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.08f),
+                                shape = RoundedCornerShape(10.dp)
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_vpn_tile),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Локация подключения",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            text = selectedConfigLabel,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                    Text(
+                        text = "Выбрать ›",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(14.dp))
+
             // Action Buttons: Paste from Clipboard & Scan QR
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 // Button 1: Paste from Clipboard
                 Button(
@@ -318,20 +472,22 @@ fun DashboardScreen(
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .height(56.dp),
+                        .height(46.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.primary
+                        contentColor = MaterialTheme.colorScheme.onSurface
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(11.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_paste),
                         contentDescription = null,
-                        modifier = Modifier.size(19.dp)
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Вставить ссылку", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("Вставить", fontSize = 13.sp)
                 }
 
                 // Button 2: Scan QR Code
@@ -365,102 +521,26 @@ fun DashboardScreen(
                     },
                     modifier = Modifier
                         .weight(1f)
-                        .height(56.dp),
+                        .height(46.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.surface,
-                        contentColor = MaterialTheme.colorScheme.primary
+                        contentColor = MaterialTheme.colorScheme.onSurface
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(11.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_qr_code),
                         contentDescription = null,
-                        modifier = Modifier.size(19.dp)
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Сканировать QR", fontSize = 13.sp)
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("QR-код", fontSize = 13.sp)
                 }
             }
         }
 
-        item {
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Active Server Card
-            val selectedConfigLabel = if (vlessLink.isNotBlank()) {
-                getDisplayLabel(vlessLink)
-            } else {
-                "Сервер не выбран"
-            }
-
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    contentColor = MaterialTheme.colorScheme.onSurface
-                ),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_vpn_tile),
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Активный сервер",
-                            fontSize = 12.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = selectedConfigLabel,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-        }
-
-        item {
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Button(
-                onClick = {
-                    if (isConnected) {
-                        viewModel.disconnect()
-                    } else {
-                        activity?.let { viewModel.connect(it) }
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isConnected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
-                    contentColor = if (isConnected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimary
-                ),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    text = if (isConnected) "Отключиться" else "Подключиться",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-        }
 
         if (isConnected && exitIpInfo != null) {
             item {

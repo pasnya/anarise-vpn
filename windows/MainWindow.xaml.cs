@@ -51,7 +51,7 @@ namespace Anarise
         private string proxyPassword = LocalProxyCredentials.Create();
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.20";
+        private const string AppVersion = "1.4.21";
         private const string RequiredXrayVersion = "26.7.11";
         // Binary downloads can be several dozen megabytes and may be throttled by
         // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
