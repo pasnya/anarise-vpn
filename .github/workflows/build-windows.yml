@@ -66,8 +66,21 @@ jobs:
         if ([string]::IsNullOrEmpty($tag)) {
           $tag = $env:GITHUB_REF_NAME
         }
-        gh release view $tag | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-          throw "Release '$tag' does not exist."
+        $releaseQuery = '.[] | select(.tag_name == "' + $tag + '") | .id'
+        $releaseId = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq $releaseQuery | Select-Object -First 1
+        if ([string]::IsNullOrWhiteSpace($releaseId)) { throw "Release '$tag' does not exist." }
+        $asset = "AnariseVPN-Windows-x64-$tag.zip"
+        $assetQuery = '.[] | select(.name == "' + $asset + '") | .id'
+        $assetIds = gh api "repos/$env:GITHUB_REPOSITORY/releases/$releaseId/assets" --paginate --jq $assetQuery
+        foreach ($assetId in $assetIds) {
+          gh api --method DELETE "repos/$env:GITHUB_REPOSITORY/releases/assets/$assetId" | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not remove old asset '$asset'." }
         }
-        gh release upload $tag "AnariseVPN-Windows-x64-$tag.zip" --clobber
+        curl.exe --fail --silent --show-error --location --request POST `
+          --header "Accept: application/vnd.github+json" `
+          --header "Authorization: Bearer $env:GH_TOKEN" `
+          --header "X-GitHub-Api-Version: 2022-11-28" `
+          --header "Content-Type: application/octet-stream" `
+          --data-binary "@$asset" `
+          "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$releaseId/assets?name=$asset" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not upload asset '$asset'." }
