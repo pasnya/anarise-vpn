@@ -53,8 +53,8 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             SettingSwitchCard(
-                title = "Kill Switch",
-                description = "Блокировать интернет при обрыве VPN соединения",
+                title = "Блокировка без VPN",
+                description = "Отключать интернет, если VPN неожиданно прервётся",
                 checked = killSwitch,
                 onCheckedChange = { viewModel.toggleKillSwitch(it) }
             )

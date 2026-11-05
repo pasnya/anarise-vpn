@@ -18,6 +18,16 @@ dotnet publish "$SCRIPT_DIR/Anarise.Mac.csproj" \
   -p:PublishSingleFile=false \
   -o "$PUBLISH_DIR"
 
+# Fail early if publish silently produced a framework-dependent app. Such a
+# bundle will bounce once in the Dock and exit on Macs without .NET 8 installed.
+for runtime_file in libhostfxr.dylib libhostpolicy.dylib libcoreclr.dylib; do
+  if [ ! -f "$PUBLISH_DIR/$runtime_file" ]; then
+    echo "ERROR: self-contained macOS runtime is incomplete: missing $runtime_file in $PUBLISH_DIR" >&2
+    echo "The app bundle would require a separately installed .NET 8 runtime." >&2
+    exit 1
+  fi
+done
+
 # 2. Assemble .app bundle
 rm -rf "$APP_BUNDLE"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
@@ -76,7 +86,7 @@ cat > "$DMG_STAGING/ИНСТРУКЦИЯ ПО УСТАНОВКЕ.txt" << 'EOF'
 
 1. Перетащите иконку «Anarise» в папку «Applications» (Программы).
 
-2. ПЕРВЫЙ ЗАПУСК НА СОВРЕМЕННЫХ MACOS (Sequoia, Sonoma, Ventura):
+2. ПЕРВЫЙ ЗАПУСК НА MACOS:
    - Откройте папку «Программы» и запустите Anarise.
    - Если система покажет сообщение безопасности, нажмите «Готово» / «ОК».
    - Перейдите в «Системные настройки» -> «Конфиденциальность и безопасность».

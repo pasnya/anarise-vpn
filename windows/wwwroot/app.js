@@ -566,16 +566,16 @@ function updateVpnState(state) {
             btn.innerText = 'Подключиться';
             btn.className = 'connect-btn';
             hideStatsContainerDetails();
-            sidebarTitle.innerText = 'Shield inactive';
-            sidebarSubtitle.innerText = 'Not protected';
+            sidebarTitle.innerText = 'Соединение выключено';
+            sidebarSubtitle.innerText = 'Интернет работает напрямую';
             sidebarDot.className = 'sidebar-status-dot';
             break;
         case 'CONNECTING':
             label.innerText = 'Подключение...';
             btn.innerText = 'Прервать';
             btn.className = 'connect-btn';
-            sidebarTitle.innerText = 'Connecting';
-            sidebarSubtitle.innerText = 'Negotiating tunnel';
+            sidebarTitle.innerText = 'Подключаемся';
+            sidebarSubtitle.innerText = 'Устанавливаем соединение';
             sidebarDot.className = 'sidebar-status-dot connecting';
             break;
         case 'CONNECTED':
@@ -583,8 +583,8 @@ function updateVpnState(state) {
             btn.innerText = 'Отключиться';
             btn.className = 'connect-btn connected';
             showStatsContainerDetails();
-            sidebarTitle.innerText = 'Shield active';
-            sidebarSubtitle.innerText = 'Connection protected';
+            sidebarTitle.innerText = 'Соединение включено';
+            sidebarSubtitle.innerText = 'Туннель работает';
             sidebarDot.className = 'sidebar-status-dot connected';
             break;
         case 'ERROR':
@@ -592,8 +592,8 @@ function updateVpnState(state) {
             btn.innerText = 'Подключиться';
             btn.className = 'connect-btn';
             hideStatsContainerDetails();
-            sidebarTitle.innerText = 'Connection error';
-            sidebarSubtitle.innerText = 'Check diagnostics';
+            sidebarTitle.innerText = 'Не удалось подключиться';
+            sidebarSubtitle.innerText = 'Откройте диагностику';
             sidebarDot.className = 'sidebar-status-dot error';
             break;
     }

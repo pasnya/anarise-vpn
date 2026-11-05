@@ -119,21 +119,42 @@ internal static class SecureStorage
 
         if (OperatingSystem.IsMacOS())
         {
-            string? keychainValue = MacKeychainStore.GetPassword();
-            if (keychainValue != null)
-                return DecodeKey(keychainValue, "macOS Keychain");
-
-            if (File.Exists(keyFile))
+            try
             {
-                byte[] legacyKey = DecodeKey(File.ReadAllText(keyFile).Trim(), "legacy key file");
-                string selectedKey = MacKeychainStore.AddPasswordIfAbsent(Convert.ToBase64String(legacyKey));
-                try { File.Delete(keyFile); } catch { }
-                return DecodeKey(selectedKey, "macOS Keychain");
+                if (File.Exists(keyFile))
+                {
+                    byte[] stored = Convert.FromBase64String(File.ReadAllText(keyFile).Trim());
+                    if (stored.Length == 32) return stored;
+                }
             }
+            catch { }
 
-            byte[] firstKey = RandomNumberGenerator.GetBytes(32);
-            string selected = MacKeychainStore.AddPasswordIfAbsent(Convert.ToBase64String(firstKey));
-            return DecodeKey(selected, "macOS Keychain");
+            // Try Keychain non-blocking / safe fallback
+            try
+            {
+                string? keychainValue = MacKeychainStore.GetPassword();
+                if (keychainValue != null)
+                {
+                    byte[] kKey = DecodeKey(keychainValue, "macOS Keychain");
+                    try
+                    {
+                        File.WriteAllText(keyFile, Convert.ToBase64String(kKey), Encoding.UTF8);
+                        File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
+                    catch { }
+                    return kKey;
+                }
+            }
+            catch { }
+
+            byte[] macKey = RandomNumberGenerator.GetBytes(32);
+            try
+            {
+                File.WriteAllText(keyFile, Convert.ToBase64String(macKey), Encoding.UTF8);
+                File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+            catch { }
+            return macKey;
         }
 
         try

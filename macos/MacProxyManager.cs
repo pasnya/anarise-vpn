@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 
 namespace Anarise;
 
@@ -485,24 +486,40 @@ public static class MacProxyManager
             }
 
             string escaped = shellCommand.Replace("\\", "\\\\").Replace("\"", "\\\"");
+            string appleScript = $"do shell script \"{escaped}\" with administrator privileges";
             using var proc = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = "/usr/bin/osascript",
-                    Arguments = $"-e \"do shell script \\\"{escaped}\\\" with administrator privileges\"",
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true
                 }
             };
+            proc.StartInfo.ArgumentList.Add("-e");
+            proc.StartInfo.ArgumentList.Add(appleScript);
             proc.Start();
-            proc.WaitForExit(30000);
+            var standardOutput = proc.StandardOutput.ReadToEndAsync();
+            var standardError = proc.StandardError.ReadToEndAsync();
+            if (!proc.WaitForExit(120000))
+            {
+                proc.Kill(true);
+                Console.Error.WriteLine("[MacProxyManager] Administrator authorization timed out.");
+                return false;
+            }
+            Task.WaitAll(standardOutput, standardError);
+            if (proc.ExitCode != 0)
+            {
+                string details = standardError.Result.Trim();
+                Console.Error.WriteLine($"[MacProxyManager] Privileged command failed (osascript {proc.ExitCode}): {details}");
+            }
             return proc.ExitCode == 0;
         }
-        catch
+        catch (Exception ex)
         {
+            Console.Error.WriteLine($"[MacProxyManager] Privileged command could not be started: {ex.Message}");
             return false;
         }
     }

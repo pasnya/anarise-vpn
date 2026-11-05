@@ -224,7 +224,7 @@ fun DashboardScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         item {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Header toolbar with settings gear
             Row(
@@ -235,7 +235,7 @@ fun DashboardScreen(
                 Text(
                     text = "ANARISE",
                     color = MaterialTheme.colorScheme.primary,
-                    fontSize = 30.sp,
+                    fontSize = 24.sp,
                     fontWeight = FontWeight.Bold
                 )
                 IconButton(onClick = onNavigateToSettings) {
@@ -250,7 +250,7 @@ fun DashboardScreen(
         }
 
         item {
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
@@ -259,13 +259,9 @@ fun DashboardScreen(
             ) {
                 Box(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("•  GLOBAL NETWORK", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                        Text("Выберите защищённый узел", color = MaterialTheme.colorScheme.onBackground, fontSize = 23.sp, fontWeight = FontWeight.Bold)
-                        Text("Найдите оптимальный сервер и инициируйте защищённый туннель.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
-                    }
-                    Column(modifier = Modifier.align(Alignment.TopEnd), horizontalAlignment = Alignment.End) {
-                        Text(historyList.size.toString(), color = MaterialTheme.colorScheme.primary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Text("узлов", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
+                        Text("ВАШЕ ПОДКЛЮЧЕНИЕ", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Подключитесь к VPN", color = MaterialTheme.colorScheme.onBackground, fontSize = 21.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Нажмите на сервер в списке, чтобы подключиться, или добавьте свой.", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
                     }
                 }
             }
@@ -276,14 +272,14 @@ fun DashboardScreen(
 
             Text(
                 text = when (state) {
-                    VyomState.CONNECTED -> "Подключено"
-                    VyomState.CONNECTING -> "Подключение..."
-                    VyomState.DISCONNECTED -> "Отключено"
-                    VyomState.ERROR -> "Ошибка"
+                    VyomState.CONNECTED -> "Соединение включено · туннель работает"
+                    VyomState.CONNECTING -> "Подключаемся · устанавливаем соединение"
+                    VyomState.DISCONNECTED -> "Соединение выключено · интернет работает напрямую"
+                    VyomState.ERROR -> "Не удалось подключиться · попробуйте другой сервер"
                     else -> "Ожидание"
                 },
                 color = if (isConnected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onBackground,
-                fontSize = 18.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Medium
             )
         }
@@ -324,16 +320,18 @@ fun DashboardScreen(
                         .weight(1f)
                         .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.primary
                     ),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_paste),
-                        contentDescription = "Вставить из буфера",
-                        modifier = Modifier.size(24.dp)
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Вставить ссылку", fontSize = 13.sp)
                 }
 
                 // Button 2: Scan QR Code
@@ -369,16 +367,18 @@ fun DashboardScreen(
                         .weight(1f)
                         .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        containerColor = MaterialTheme.colorScheme.surface,
+                        contentColor = MaterialTheme.colorScheme.primary
                     ),
-                    shape = RoundedCornerShape(16.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_qr_code),
-                        contentDescription = "Сканировать QR-код",
-                        modifier = Modifier.size(24.dp)
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp)
                     )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Сканировать QR", fontSize = 13.sp)
                 }
             }
         }
@@ -447,12 +447,12 @@ fun DashboardScreen(
                 },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(56.dp),
+                    .height(48.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isConnected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.primary,
                     contentColor = if (isConnected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onPrimary
                 ),
-                shape = RoundedCornerShape(16.dp)
+                shape = RoundedCornerShape(12.dp)
             ) {
                 Text(
                     text = if (isConnected) "Отключиться" else "Подключиться",
