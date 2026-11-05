@@ -12,6 +12,13 @@ public sealed class MacProxySettingsSnapshot
     public bool WebProxyEnabled { get; set; }
     public bool SecureWebProxyEnabled { get; set; }
     public bool SocksProxyEnabled { get; set; }
+    public string WebProxyServer { get; set; } = "";
+    public int WebProxyPort { get; set; }
+    public string SecureWebProxyServer { get; set; } = "";
+    public int SecureWebProxyPort { get; set; }
+    public string SocksProxyServer { get; set; } = "";
+    public int SocksProxyPort { get; set; }
+    public string[]? ProxyBypassDomains { get; set; }
     public string[]? OriginalDnsServers { get; set; }
 }
 
@@ -85,23 +92,24 @@ public static class MacProxyManager
     {
         var service = GetActiveService();
         var snapshot = new MacProxySettingsSnapshot { Service = service };
+        var web = RunCommand("/usr/sbin/networksetup", $"-getwebproxy \"{service}\"");
+        var secure = RunCommand("/usr/sbin/networksetup", $"-getsecurewebproxy \"{service}\"");
+        var socks = RunCommand("/usr/sbin/networksetup", $"-getsocksfirewallproxy \"{service}\"");
+        var bypass = RunCommand("/usr/sbin/networksetup", $"-getproxybypassdomains \"{service}\"");
+        if (new[] { web, secure, socks, bypass }.Any(output => output.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)))
+            throw new IOException("Не удалось сохранить текущие настройки системного прокси macOS.");
 
-        try
-        {
-            var web = RunCommand("/usr/sbin/networksetup", $"-getwebproxy \"{service}\"");
-            snapshot.WebProxyEnabled = web.Contains("Enabled: Yes");
-
-            var secure = RunCommand("/usr/sbin/networksetup", $"-getsecurewebproxy \"{service}\"");
-            snapshot.SecureWebProxyEnabled = secure.Contains("Enabled: Yes");
-
-            var socks = RunCommand("/usr/sbin/networksetup", $"-getsocksfirewallproxy \"{service}\"");
-            snapshot.SocksProxyEnabled = socks.Contains("Enabled: Yes");
-
-            snapshot.OriginalDnsServers = GetDnsServers(service);
-        }
-        catch
-        {
-        }
+        snapshot.WebProxyEnabled = web.Contains("Enabled: Yes");
+        snapshot.SecureWebProxyEnabled = secure.Contains("Enabled: Yes");
+        snapshot.SocksProxyEnabled = socks.Contains("Enabled: Yes");
+        (snapshot.WebProxyServer, snapshot.WebProxyPort) = ParseProxyEndpoint(web);
+        (snapshot.SecureWebProxyServer, snapshot.SecureWebProxyPort) = ParseProxyEndpoint(secure);
+        (snapshot.SocksProxyServer, snapshot.SocksProxyPort) = ParseProxyEndpoint(socks);
+        snapshot.ProxyBypassDomains = bypass.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => value.Trim())
+            .Where(value => !string.IsNullOrWhiteSpace(value) && !value.Contains("aren't any", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        snapshot.OriginalDnsServers = GetDnsServers(service);
 
         return snapshot;
     }
@@ -130,7 +138,7 @@ public static class MacProxyManager
         }
     }
 
-    public static void RestoreDnsServers(string? service = null, string[]? originalDnsServers = null)
+    public static bool RestoreDnsServers(string? service = null, string[]? originalDnsServers = null)
     {
         service ??= GetActiveService();
         try
@@ -138,11 +146,12 @@ public static class MacProxyManager
             string dnsArgs = (originalDnsServers != null && originalDnsServers.Length > 0)
                 ? string.Join(" ", originalDnsServers)
                 : "Empty";
-            RunCommand("/usr/sbin/networksetup", $"-setdnsservers \"{service}\" {dnsArgs}");
-            RunCommand("/usr/bin/dscacheutil", "-flushcache");
+            return RunCommandSucceeded("/usr/sbin/networksetup", $"-setdnsservers \"{service}\" {dnsArgs}") &&
+                RunCommandSucceeded("/usr/bin/dscacheutil", "-flushcache");
         }
         catch
         {
+            return false;
         }
     }
 
@@ -151,15 +160,16 @@ public static class MacProxyManager
         var service = snapshot.Service;
         try
         {
-            if (!snapshot.WebProxyEnabled)
-                RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" off");
-            if (!snapshot.SecureWebProxyEnabled)
-                RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" off");
-            if (!snapshot.SocksProxyEnabled)
-                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxystate \"{service}\" off");
+            bool restored = RestoreProxy(snapshot, "web", snapshot.WebProxyServer, snapshot.WebProxyPort, snapshot.WebProxyEnabled);
+            restored &= RestoreProxy(snapshot, "secureweb", snapshot.SecureWebProxyServer, snapshot.SecureWebProxyPort, snapshot.SecureWebProxyEnabled);
+            restored &= RestoreProxy(snapshot, "socksfirewall", snapshot.SocksProxyServer, snapshot.SocksProxyPort, snapshot.SocksProxyEnabled);
+            var bypassArgs = snapshot.ProxyBypassDomains is { Length: > 0 }
+                ? string.Join(" ", snapshot.ProxyBypassDomains.Select(value => $"\"{value.Replace("\"", "") }\""))
+                : "Empty";
+            restored &= RunCommandSucceeded("/usr/sbin/networksetup", $"-setproxybypassdomains \"{service}\" {bypassArgs}");
 
-            RestoreDnsServers(service, snapshot.OriginalDnsServers);
-            return true;
+            restored &= RestoreDnsServers(service, snapshot.OriginalDnsServers);
+            return restored;
         }
         catch
         {
@@ -167,7 +177,37 @@ public static class MacProxyManager
         }
     }
 
-    public static bool SetProxy(bool enabled, int socksPort = 20808, int httpPort = 20809, bool bypassLan = true, bool enableHttpProxy = true)
+    private static (string Server, int Port) ParseProxyEndpoint(string output)
+    {
+        var server = Regex.Match(output, @"(?m)^Server:\s*(.+?)\s*$");
+        var port = Regex.Match(output, @"(?m)^Port:\s*(\d+)\s*$");
+        return (server.Success ? server.Groups[1].Value.Trim() : "", port.Success && int.TryParse(port.Groups[1].Value, out var value) ? value : 0);
+    }
+
+    private static bool RestoreProxy(MacProxySettingsSnapshot snapshot, string kind, string server, int port, bool enabled)
+    {
+        string service = snapshot.Service;
+        string stateFlag = kind switch
+        {
+            "web" => "-setwebproxystate",
+            "secureweb" => "-setsecurewebproxystate",
+            _ => "-setsocksfirewallproxystate"
+        };
+        string setFlag = kind switch
+        {
+            "web" => "-setwebproxy",
+            "secureweb" => "-setsecurewebproxy",
+            _ => "-setsocksfirewallproxy"
+        };
+
+        bool ok = true;
+        if (!string.IsNullOrWhiteSpace(server) && port is > 0 and <= 65535)
+            ok &= RunCommandSucceeded("/usr/sbin/networksetup", $"{setFlag} \"{service}\" \"{server.Replace("\"", "") }\" {port} off");
+        ok &= RunCommandSucceeded("/usr/sbin/networksetup", $"{stateFlag} \"{service}\" {(enabled ? "on" : "off")}");
+        return ok;
+    }
+
+    public static bool SetProxy(bool enabled, int socksPort = 20808, int httpPort = 20809, bool bypassLan = true, bool enableHttpProxy = true, string? username = null, string? password = null)
     {
         var service = GetActiveService();
 
@@ -177,8 +217,10 @@ public static class MacProxyManager
             {
                 if (enableHttpProxy)
                 {
-                    RunCommand("/usr/sbin/networksetup", $"-setwebproxy \"{service}\" 127.0.0.1 {httpPort}");
-                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}");
+                    string authArgs = !string.IsNullOrWhiteSpace(username) && !string.IsNullOrEmpty(password)
+                        ? $" on \"{username}\" \"{password}\"" : " off";
+                    RunCommand("/usr/sbin/networksetup", $"-setwebproxy \"{service}\" 127.0.0.1 {httpPort}{authArgs}");
+                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}{authArgs}");
                     RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" on");
                     RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" on");
                 }
@@ -188,7 +230,9 @@ public static class MacProxyManager
                     RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" off");
                 }
 
-                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}");
+                string socksAuthArgs = !string.IsNullOrWhiteSpace(username) && !string.IsNullOrEmpty(password)
+                    ? $" on \"{username}\" \"{password}\"" : " off";
+                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}{socksAuthArgs}");
                 RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxystate \"{service}\" on");
 
                 if (bypassLan)
@@ -230,11 +274,11 @@ public static class MacProxyManager
                     $"block drop out quick proto {{ tcp, udp }} to ! {{ {allowed} }}\n";
                 File.WriteAllText(confPath, rules);
 
-                RunPrivilegedShell($"/sbin/pfctl -a anarise_ks -f {confPath} -e");
+                if (!RunPrivilegedShell($"/sbin/pfctl -a anarise_ks -f {confPath} -e")) return false;
             }
             else
             {
-                RunPrivilegedShell("/sbin/pfctl -a anarise_ks -F all");
+                if (!RunPrivilegedShell("/sbin/pfctl -a anarise_ks -F all")) return false;
                 if (File.Exists(confPath))
                 {
                     try { File.Delete(confPath); } catch { }
@@ -288,7 +332,7 @@ public static class MacProxyManager
         }
     }
 
-    public static void CleanupTunRoutes(string? serverIp)
+    public static bool CleanupTunRoutes(string? serverIp)
     {
         try
         {
@@ -310,10 +354,11 @@ public static class MacProxyManager
                 cmds.Add($"/sbin/route delete -host {serverIp} >/dev/null 2>&1 || true");
             }
 
-            RunPrivilegedShell(string.Join(" ; ", cmds));
+            bool success = RunPrivilegedShell(string.Join(" ; ", cmds));
             savedTunDnsServers = null;
+            return success;
         }
-        catch { }
+        catch { return false; }
     }
 
     public static bool SetAutostartLaunchAgent(bool enable)
@@ -423,8 +468,19 @@ public static class MacProxyManager
             var idOut = RunCommand("/usr/bin/id", "-u").Trim();
             if (idOut == "0")
             {
-                RunCommand("/bin/sh", $"-c \"{shellCommand.Replace("\"", "\\\"")}\"");
-                return true;
+                using var rootProc = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = "/bin/sh",
+                        ArgumentList = { "-c", shellCommand },
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+                rootProc.Start();
+                rootProc.WaitForExit(30000);
+                return !rootProc.HasExited ? StopAndFail(rootProc) : rootProc.ExitCode == 0;
             }
 
             string escaped = shellCommand.Replace("\\", "\\\\").Replace("\"", "\\\"");
@@ -475,5 +531,36 @@ public static class MacProxyManager
         {
             return $"Error: {ex.Message}";
         }
+    }
+
+    private static bool RunCommandSucceeded(string binary, string arguments)
+    {
+        try
+        {
+            using var proc = new Process
+            {
+                StartInfo = new ProcessStartInfo
+                {
+                    FileName = binary,
+                    Arguments = arguments,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+            proc.Start();
+            _ = proc.StandardOutput.ReadToEnd();
+            _ = proc.StandardError.ReadToEnd();
+            proc.WaitForExit();
+            return proc.ExitCode == 0;
+        }
+        catch { return false; }
+    }
+
+    private static bool StopAndFail(Process process)
+    {
+        try { process.Kill(true); } catch { }
+        return false;
     }
 }

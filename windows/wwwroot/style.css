@@ -711,6 +711,13 @@ body {
     -moz-appearance: textfield;
 }
 
+.credential-input {
+    width: min(260px, 55%);
+    text-align: left;
+    user-select: text;
+    -webkit-user-select: text;
+}
+
 .setting-input::-webkit-outer-spin-button,
 .setting-input::-webkit-inner-spin-button {
     -webkit-appearance: none;

@@ -41,7 +41,7 @@
                         <span class="nav-glyph">⚙</span><span>Settings</span>
                     </button>
                 </nav>
-                <div class="sidebar-footer">v1.4.18 · secure tunnel</div>
+                <div class="sidebar-footer">v1.4.19 · secure tunnel</div>
             </aside>
             <!-- Header -->
             <header class="header">
@@ -263,6 +263,25 @@
                         <span class="setting-desc">Локальный порт HTTP прокси</span>
                     </div>
                     <input type="number" id="input-http-port" class="setting-input" value="20809" min="1" max="65535">
+                </div>
+
+                <div class="setting-card">
+                    <div class="setting-info">
+                        <span class="setting-title">Защита локального прокси</span>
+                        <span class="setting-desc">Требовать логин и пароль для локальных портов. Для системного прокси приложения могут запросить эти данные</span>
+                    </div>
+                    <div class="toggle-switch">
+                        <input type="checkbox" id="chk-proxy-auth" checked>
+                        <label for="chk-proxy-auth"></label>
+                    </div>
+                </div>
+                <div class="setting-card">
+                    <div class="setting-info"><span class="setting-title">Логин прокси</span></div>
+                    <input type="text" id="input-proxy-user" class="setting-input credential-input" readonly>
+                </div>
+                <div class="setting-card">
+                    <div class="setting-info"><span class="setting-title">Пароль прокси</span></div>
+                    <input type="text" id="input-proxy-password" class="setting-input credential-input" readonly>
                 </div>
 
                 <div class="settings-section-title">Основные</div>

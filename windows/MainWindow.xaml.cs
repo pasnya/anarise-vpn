@@ -41,9 +41,12 @@ namespace Anarise
         private bool bypassLan = true;
         private int socksPort = 20808;
         private int httpPort = 20809;
+        private bool proxyAuthEnabled = true;
+        private string proxyUsername = LocalProxyCredentials.Create(10);
+        private string proxyPassword = LocalProxyCredentials.Create();
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.18";
+        private const string AppVersion = "1.4.19";
         private const string RequiredXrayVersion = "26.7.11";
         // Binary downloads can be several dozen megabytes and may be throttled by
         // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
@@ -101,6 +104,7 @@ namespace Anarise
 
             LoadSettings();
             LoadHistory();
+            SaveSettings();
 
             // Set up WebView2
             InitializeWebView();
@@ -516,7 +520,8 @@ namespace Anarise
                 // Write configuration file
                 string configPath = Path.Combine(appDataPath,
                     isMieru ? "mieru_config.json" : (isHysteria ? "hysteria_config.json" : "xray_config.json"));
-                string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria);
+                string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria,
+                    proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
                 File.WriteAllText(configPath, finalCoreConfig);
 
                 if (gen != connectionGeneration) return;
@@ -811,7 +816,7 @@ namespace Anarise
                 var psi = new ProcessStartInfo
                 {
                     FileName = tun2socksExe,
-                    Arguments = $"-device tun://anarise -proxy socks5://127.0.0.1:{socksPort} -loglevel warn",
+                    Arguments = $"-device tun://anarise -proxy socks5://{(proxyAuthEnabled ? Uri.EscapeDataString(proxyUsername) + ":" + Uri.EscapeDataString(proxyPassword) + "@" : "")}127.0.0.1:{socksPort} -loglevel warn",
                     WorkingDirectory = binariesPath,
                     CreateNoWindow = true,
                     UseShellExecute = false,
@@ -993,6 +998,9 @@ namespace Anarise
                             bypassLan,
                             socksPort,
                             httpPort,
+                            proxyAuthEnabled,
+                            proxyUsername,
+                            proxyPassword,
                             vpnMode,
                             systemProxy
                         }
@@ -1217,7 +1225,8 @@ namespace Anarise
         // --- EXIT IP CHECKER ---
         private async Task FetchExitIpInfoAsync()
         {
-            var exitIp = await DesktopCoreServices.FetchExitIpInfoAsync(socksPort, LogToUi);
+            var exitIp = await DesktopCoreServices.FetchExitIpInfoAsync(socksPort, LogToUi,
+                proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
             if (exitIp != null)
             {
                 PostToUi(new { action = "updateExitIp", exitIp = exitIp });
@@ -1801,6 +1810,9 @@ namespace Anarise
                         if (settings.TryGetValue("bypassLan", out var valBl) && valBl != null) bypassLan = Convert.ToBoolean(valBl.ToString());
                         if (settings.TryGetValue("socksPort", out var valSp) && valSp != null) socksPort = Convert.ToInt32(valSp.ToString());
                         if (settings.TryGetValue("httpPort", out var valHp) && valHp != null) httpPort = Convert.ToInt32(valHp.ToString());
+                        if (settings.TryGetValue("proxyAuthEnabled", out var auth) && auth != null) proxyAuthEnabled = Convert.ToBoolean(auth.ToString());
+                        if (settings.TryGetValue("proxyUsername", out var username) && username != null) proxyUsername = username.ToString() ?? proxyUsername;
+                        if (settings.TryGetValue("proxyPassword", out var password) && password != null) proxyPassword = password.ToString() ?? proxyPassword;
                         if (settings.TryGetValue("vpnMode", out var valVm) && valVm != null) vpnMode = Convert.ToBoolean(valVm.ToString());
                         if (settings.TryGetValue("systemProxy", out var valSp2) && valSp2 != null) systemProxy = Convert.ToBoolean(valSp2.ToString());
                     }
@@ -1820,6 +1832,9 @@ namespace Anarise
                 ["bypassLan"] = bypassLan,
                 ["socksPort"] = socksPort,
                 ["httpPort"] = httpPort,
+                ["proxyAuthEnabled"] = proxyAuthEnabled,
+                ["proxyUsername"] = proxyUsername,
+                ["proxyPassword"] = proxyPassword,
                 ["vpnMode"] = vpnMode,
                 ["systemProxy"] = systemProxy
             };
@@ -1873,6 +1888,9 @@ namespace Anarise
                 bypassLan = bypassLan,
                 socksPort = socksPort,
                 httpPort = httpPort,
+                proxyAuthEnabled = proxyAuthEnabled,
+                proxyUsername = proxyUsername,
+                proxyPassword = proxyPassword,
                 vpnMode = vpnMode,
                 systemProxy = systemProxy
             };
@@ -1940,6 +1958,13 @@ namespace Anarise
                         {
                             SystemProxyManager.DisableProxy();
                         }
+                    }
+                    break;
+                case "proxyAuthEnabled":
+                    proxyAuthEnabled = val;
+                    if (isConnected)
+                    {
+                        LogToUi("Аутентификация применяется при следующем подключении.");
                     }
                     break;
             }

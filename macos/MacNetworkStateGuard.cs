@@ -12,6 +12,7 @@ public sealed class MacSessionRecoveryState
     public string? ServerIp { get; set; }
     public string Service { get; set; } = "Wi-Fi";
     public string[]? OriginalDnsServers { get; set; }
+    public MacProxySettingsSnapshot? OriginalProxySettings { get; set; }
 }
 
 public static class MacNetworkStateGuard
@@ -22,13 +23,15 @@ public static class MacNetworkStateGuard
         "session-guard.json"
     );
 
-    public static void RecordSession(bool proxyActive, bool killSwitchActive, string service, bool tunRoutesActive = false, string? serverIp = null, string[]? originalDnsServers = null)
+    public static bool RecordSession(bool proxyActive, bool killSwitchActive, string service, bool tunRoutesActive = false, string? serverIp = null, string[]? originalDnsServers = null, MacProxySettingsSnapshot? originalProxySettings = null)
     {
         try
         {
             var dir = Path.GetDirectoryName(StateFilePath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
+            if (!string.IsNullOrEmpty(dir) && !OperatingSystem.IsWindows())
+                File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
 
             var state = new MacSessionRecoveryState
             {
@@ -37,11 +40,17 @@ public static class MacNetworkStateGuard
                 TunRoutesActive = tunRoutesActive,
                 ServerIp = serverIp,
                 Service = service,
-                OriginalDnsServers = originalDnsServers ?? MacProxyManager.GetDnsServers(service)
+                OriginalDnsServers = originalDnsServers ?? MacProxyManager.GetDnsServers(service),
+                OriginalProxySettings = originalProxySettings
             };
-            File.WriteAllText(StateFilePath, JsonSerializer.Serialize(state));
+            var temporaryPath = StateFilePath + ".tmp";
+            File.WriteAllText(temporaryPath, JsonSerializer.Serialize(state));
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(temporaryPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.Move(temporaryPath, StateFilePath, true);
+            return true;
         }
-        catch { }
+        catch { return false; }
     }
 
     public static void ClearSession()
@@ -67,23 +76,29 @@ public static class MacNetworkStateGuard
 
             Console.WriteLine("[MacNetworkStateGuard] Recovering from previous unclean exit...");
 
-            if (state.ProxyActive)
+            bool recovered = true;
+            if (state.OriginalProxySettings != null)
             {
-                MacProxyManager.SetProxy(false);
+                recovered &= MacProxyManager.RestoreSettings(state.OriginalProxySettings);
+            }
+            else if (state.ProxyActive)
+            {
+                recovered &= MacProxyManager.SetProxy(false);
             }
 
             if (state.TunRoutesActive)
             {
-                MacProxyManager.CleanupTunRoutes(state.ServerIp);
-                MacProxyManager.RestoreDnsServers(state.Service, state.OriginalDnsServers);
+                recovered &= MacProxyManager.CleanupTunRoutes(state.ServerIp);
+                recovered &= MacProxyManager.RestoreDnsServers(state.Service, state.OriginalDnsServers);
             }
 
             if (state.KillSwitchActive)
             {
-                MacProxyManager.SetKillSwitchBlocked(false);
+                recovered &= MacProxyManager.SetKillSwitchBlocked(false);
             }
 
-            ClearSession();
+            if (recovered) ClearSession();
+            else Console.WriteLine("[MacNetworkStateGuard] Recovery incomplete; saved state retained for the next launch.");
         }
         catch (Exception ex)
         {

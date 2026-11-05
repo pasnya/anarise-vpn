@@ -88,6 +88,11 @@ public sealed class MacAppController
     private bool vpnMode = false;
     private int socksPort = 20808;
     private int httpPort = 20809;
+    private bool proxyAuthEnabled = true;
+    private string proxyUsername = LocalProxyCredentials.Create(10);
+    private string proxyPassword = LocalProxyCredentials.Create();
+    private MacProxySettingsSnapshot? originalProxySettings;
+    private string[]? originalDnsServers;
 
     private bool isConnected = false;
     private string currentState = "DISCONNECTED";
@@ -112,7 +117,7 @@ public sealed class MacAppController
     private Task? binariesSetupTask;
     private bool updateChecked;
 
-    private const string AppVersion = "1.4.18";
+    private const string AppVersion = "1.4.19";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
@@ -134,6 +139,7 @@ public sealed class MacAppController
         CleanupRuntimeConfigFiles();
         LoadSettings();
         LoadHistory();
+        SaveSettings();
     }
 
     public void AttachWindow(PhotinoWindow win)
@@ -302,6 +308,9 @@ public sealed class MacAppController
                 bypassLan,
                 socksPort,
                 httpPort,
+                proxyAuthEnabled,
+                proxyUsername,
+                proxyPassword,
                 vpnMode,
                 systemProxy
             }
@@ -467,7 +476,8 @@ public sealed class MacAppController
 
             string configFilePath = Path.Combine(appDataDir,
                 isMieru ? "mieru_config.json" : isHysteria ? "hysteria_config.json" : "xray_config.json");
-            string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria);
+            string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria,
+                proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
             File.WriteAllText(configFilePath, finalCoreConfig);
 
             if (gen != connectionGeneration) return;
@@ -504,7 +514,9 @@ public sealed class MacAppController
                 return;
             }
 
-            var originalDns = MacProxyManager.GetDnsServers();
+            originalDnsServers ??= MacProxyManager.GetDnsServers();
+            originalProxySettings ??= MacProxyManager.CaptureSettings();
+            var originalDns = originalDnsServers;
 
             if (vpnMode)
             {
@@ -524,16 +536,22 @@ public sealed class MacAppController
             else if (systemProxy)
             {
                 LogToUi("Настройка системного прокси macOS...");
-                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan, enableHttpProxy: !isMieru);
+                if (!MacNetworkStateGuard.RecordSession(true, killSwitch, MacProxyManager.GetActiveService(), originalDnsServers: originalDns,
+                    originalProxySettings: originalProxySettings))
+                    throw new IOException("Не удалось сохранить состояние сети для аварийного восстановления.");
+                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan, enableHttpProxy: !isMieru,
+                    username: proxyAuthEnabled ? proxyUsername : null, password: proxyAuthEnabled ? proxyPassword : null);
             }
 
-            MacNetworkStateGuard.RecordSession(
+            if (!MacNetworkStateGuard.RecordSession(
                 proxyActive: systemProxy && !vpnMode,
                 killSwitchActive: killSwitch,
                 service: MacProxyManager.GetActiveService(),
                 tunRoutesActive: tunRoutesActive,
                 serverIp: savedServerIp,
-                originalDnsServers: originalDns);
+                originalDnsServers: originalDns,
+                originalProxySettings: originalProxySettings))
+                throw new IOException("Не удалось сохранить состояние активной сети.");
 
             isConnected = true;
             reconnectAttempts = 0;
@@ -574,13 +592,16 @@ public sealed class MacAppController
         statsTimer = null;
 
         string? lastServerIp = savedServerIp;
-        StopTun2Socks();
+        bool networkRestored = StopTun2Socks();
         StopTunnelCore();
         CleanupRuntimeConfigFiles();
 
         if (systemProxy)
         {
-            MacProxyManager.SetProxy(false);
+            if (!preserveKillSwitch && originalProxySettings != null)
+                networkRestored &= MacProxyManager.RestoreSettings(originalProxySettings);
+            else
+                networkRestored &= MacProxyManager.SetProxy(false);
         }
 
         if (preserveKillSwitch && killSwitch)
@@ -592,8 +613,14 @@ public sealed class MacAppController
         }
         else
         {
-            MacProxyManager.SetKillSwitchBlocked(false);
-            MacNetworkStateGuard.ClearSession();
+            networkRestored &= MacProxyManager.SetKillSwitchBlocked(false);
+            if (networkRestored)
+            {
+                MacNetworkStateGuard.ClearSession();
+                originalProxySettings = null;
+                originalDnsServers = null;
+            }
+            else LogToUi("Сетевые настройки восстановлены не полностью; сохранено состояние для восстановления при следующем запуске.");
         }
 
         currentState = "DISCONNECTED";
@@ -625,7 +652,7 @@ public sealed class MacAppController
             var psi = new ProcessStartInfo
             {
                 FileName = tunExe,
-                Arguments = $"-device tun://{utunName} -proxy socks5://127.0.0.1:{socksPort} -loglevel warn",
+                Arguments = $"-device tun://{utunName} -proxy socks5://{(proxyAuthEnabled ? Uri.EscapeDataString(proxyUsername) + ":" + Uri.EscapeDataString(proxyPassword) + "@" : "")}127.0.0.1:{socksPort} -loglevel warn",
                 WorkingDirectory = binariesDir,
                 CreateNoWindow = true,
                 UseShellExecute = false,
@@ -651,13 +678,16 @@ public sealed class MacAppController
                 return false;
             }
 
+            if (!MacNetworkStateGuard.RecordSession(false, killSwitch, MacProxyManager.GetActiveService(), tunRoutesActive: true,
+                serverIp: savedServerIp, originalDnsServers: originalDnsServers, originalProxySettings: originalProxySettings))
+                throw new IOException("Не удалось сохранить состояние TUN для восстановления.");
+            tunRoutesActive = true;
             if (!MacProxyManager.ConfigureTunRoutes(utunName, savedServerIp, savedDefaultGateway))
             {
                 LogToUi("Не удалось настроить маршруты TUN-интерфейса.");
                 return false;
             }
 
-            tunRoutesActive = true;
             LogToUi("VPN-туннель (utun85) активирован.");
             return true;
         }
@@ -668,14 +698,15 @@ public sealed class MacAppController
         }
     }
 
-    private void StopTun2Socks()
+    private bool StopTun2Socks()
     {
         var proc = tun2socksProcess;
+        bool restored = true;
         try
         {
             if (tunRoutesActive)
             {
-                MacProxyManager.CleanupTunRoutes(savedServerIp);
+                restored = MacProxyManager.CleanupTunRoutes(savedServerIp);
                 tunRoutesActive = false;
             }
 
@@ -693,6 +724,7 @@ public sealed class MacAppController
             savedServerIp = null;
             savedDefaultGateway = null;
         }
+        return restored;
     }
 
     // --- TRAFFIC STATISTICS & HEALTH MONITOR ---
@@ -793,7 +825,8 @@ public sealed class MacAppController
     // --- EXIT IP CHECKER ---
     private async Task FetchExitIpInfoAsync()
     {
-        var exitIp = await DesktopCoreServices.FetchExitIpInfoAsync(socksPort, LogToUi);
+        var exitIp = await DesktopCoreServices.FetchExitIpInfoAsync(socksPort, LogToUi,
+            proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
         if (exitIp != null)
         {
             PostToUi(new { action = "updateExitIp", exitIp });
@@ -1356,15 +1389,21 @@ public sealed class MacAppController
                 bypassLan = val.GetValue<bool>();
                 if (isConnected && !vpnMode && systemProxy)
                 {
-                    MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan);
+                    MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan,
+                        username: proxyAuthEnabled ? proxyUsername : null, password: proxyAuthEnabled ? proxyPassword : null);
                 }
                 break;
             case "systemProxy":
                 systemProxy = val.GetValue<bool>();
                 if (isConnected && !vpnMode)
                 {
-                    MacProxyManager.SetProxy(systemProxy, socksPort, httpPort, bypassLan);
+                    MacProxyManager.SetProxy(systemProxy, socksPort, httpPort, bypassLan,
+                        username: proxyAuthEnabled ? proxyUsername : null, password: proxyAuthEnabled ? proxyPassword : null);
                 }
+                break;
+            case "proxyAuthEnabled":
+                proxyAuthEnabled = val.GetValue<bool>();
+                if (isConnected) LogToUi("Аутентификация применяется при следующем подключении.");
                 break;
             case "vpnMode":
                 vpnMode = val.GetValue<bool>();
@@ -1403,6 +1442,9 @@ public sealed class MacAppController
                     vpnMode = doc["vpnMode"]?.GetValue<bool>() ?? false;
                     socksPort = doc["socksPort"]?.GetValue<int>() ?? 20808;
                     httpPort = doc["httpPort"]?.GetValue<int>() ?? 20809;
+                    proxyAuthEnabled = doc["proxyAuthEnabled"]?.GetValue<bool>() ?? true;
+                    proxyUsername = doc["proxyUsername"]?.ToString() ?? proxyUsername;
+                    proxyPassword = doc["proxyPassword"]?.ToString() ?? proxyPassword;
                     currentConfigLink = doc["currentConfigLink"]?.ToString() ?? "";
                 }
             }
@@ -1424,6 +1466,9 @@ public sealed class MacAppController
                 ["vpnMode"] = vpnMode,
                 ["socksPort"] = socksPort,
                 ["httpPort"] = httpPort,
+                ["proxyAuthEnabled"] = proxyAuthEnabled,
+                ["proxyUsername"] = proxyUsername,
+                ["proxyPassword"] = proxyPassword,
                 ["currentConfigLink"] = currentConfigLink
             };
             SecureStorage.Write(settingsPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));

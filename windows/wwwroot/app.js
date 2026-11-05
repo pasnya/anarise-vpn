@@ -17,6 +17,9 @@ let appState = {
         bypassLan: true,
         socksPort: 20808,
         httpPort: 20809,
+        proxyAuthEnabled: true,
+        proxyUsername: '',
+        proxyPassword: '',
         vpnMode: false,
         systemProxy: true
     },
@@ -240,6 +243,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // System proxy toggle
     document.getElementById('chk-system-proxy').addEventListener('change', (e) => {
         sendToHost('saveSetting', { name: 'systemProxy', value: e.target.checked });
+    });
+    document.getElementById('chk-proxy-auth').addEventListener('change', (e) => {
+        sendToHost('saveSetting', { name: 'proxyAuthEnabled', value: e.target.checked });
     });
 
     // VPN mode toggle
@@ -524,6 +530,9 @@ function syncSettingsUi() {
     document.getElementById('chk-system-proxy').checked = appState.settings.systemProxy !== false;
     document.getElementById('input-socks-port').value = appState.settings.socksPort || 20808;
     document.getElementById('input-http-port').value = appState.settings.httpPort || 20809;
+    document.getElementById('chk-proxy-auth').checked = appState.settings.proxyAuthEnabled !== false;
+    document.getElementById('input-proxy-user').value = appState.settings.proxyUsername || '';
+    document.getElementById('input-proxy-password').value = appState.settings.proxyPassword || '';
     updateVpnModeUi(appState.settings.vpnMode);
 }
 

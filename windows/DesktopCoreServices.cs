@@ -117,11 +117,14 @@ public static class DesktopCoreServices
         throw new InvalidOperationException($"Не удалось разрешить {hostname} через защищённый DoH. Локальный DNS не используется.");
     }
 
-    public static async Task<object?> FetchExitIpInfoAsync(int socksPort, Action<string>? log = null)
+    public static async Task<object?> FetchExitIpInfoAsync(int socksPort, Action<string>? log = null, string? proxyUsername = null, string? proxyPassword = null)
     {
+        var proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}");
+        if (!string.IsNullOrEmpty(proxyUsername) && !string.IsNullOrEmpty(proxyPassword))
+            proxy.Credentials = new NetworkCredential(proxyUsername, proxyPassword);
         var handler = new HttpClientHandler
         {
-            Proxy = new WebProxy($"socks5://127.0.0.1:{socksPort}"),
+            Proxy = proxy,
             UseProxy = true
         };
 
@@ -278,7 +281,7 @@ public static class DesktopCoreServices
         return null;
     }
 
-    public static string BuildRuntimeCoreConfig(string parsedConfig, int socksPort, int httpPort, bool isMieru, bool isHysteria)
+    public static string BuildRuntimeCoreConfig(string parsedConfig, int socksPort, int httpPort, bool isMieru, bool isHysteria, string? proxyUsername = null, string? proxyPassword = null)
     {
         if (isMieru)
         {
@@ -326,6 +329,15 @@ public static class DesktopCoreServices
                 ["loggingLevel"] = "INFO"
             };
 
+            if (!string.IsNullOrWhiteSpace(proxyUsername) && !string.IsNullOrEmpty(proxyPassword))
+            {
+                mieruConfig["socks5Authentication"] = new JsonArray(new JsonObject
+                {
+                    ["user"] = proxyUsername,
+                    ["password"] = proxyPassword
+                });
+            }
+
             return mieruConfig.ToJsonString();
         }
 
@@ -340,6 +352,14 @@ public static class DesktopCoreServices
                 ["http"] = new JsonObject { ["listen"] = $"127.0.0.1:{httpPort}" },
                 ["logger"] = new JsonObject { ["level"] = "warn" }
             };
+
+            if (!string.IsNullOrWhiteSpace(proxyUsername) && !string.IsNullOrEmpty(proxyPassword))
+            {
+                hysteriaConfig["socks5"]!["username"] = proxyUsername;
+                hysteriaConfig["socks5"]!["password"] = proxyPassword;
+                hysteriaConfig["http"]!["username"] = proxyUsername;
+                hysteriaConfig["http"]!["password"] = proxyPassword;
+            }
 
             if (rawHysteriaConfig["sni"] != null)
             {
@@ -376,7 +396,27 @@ public static class DesktopCoreServices
             return hysteriaConfig.ToJsonString();
         }
 
-        return parsedConfig;
+        if (string.IsNullOrWhiteSpace(proxyUsername) || string.IsNullOrEmpty(proxyPassword))
+            return parsedConfig;
+
+        var coreConfig = JsonNode.Parse(parsedConfig)!.AsObject();
+        if (coreConfig["inbounds"] is JsonArray inbounds)
+        {
+            foreach (var inbound in inbounds.OfType<JsonObject>())
+            {
+                if (inbound["protocol"]?.ToString() is not ("socks" or "http")) continue;
+                var settings = inbound["settings"] as JsonObject ?? new JsonObject();
+                inbound["settings"] = settings;
+                if (inbound["protocol"]!.ToString() == "socks") settings["auth"] = "password";
+                string accountsProperty = inbound["protocol"]!.ToString() == "socks" ? "accounts" : "users";
+                settings[accountsProperty] = new JsonArray(new JsonObject
+                {
+                    ["user"] = proxyUsername,
+                    ["pass"] = proxyPassword
+                });
+            }
+        }
+        return coreConfig.ToJsonString();
     }
 
     public static async Task<string> GetBoundedTextAsync(HttpClient client, string url)

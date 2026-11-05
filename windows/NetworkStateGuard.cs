@@ -15,29 +15,37 @@ internal sealed class NetworkStateGuard
 
     public void RecoverInterruptedSession()
     {
+        bool recovered = true;
         try
         {
-            if (!File.Exists(recoveryPath)) return;
-            snapshot = JsonSerializer.Deserialize<ProxySettingsSnapshot>(File.ReadAllText(recoveryPath));
-            if (snapshot != null) SystemProxyManager.RestoreSettings(snapshot);
+            if (File.Exists(recoveryPath))
+            {
+                snapshot = JsonSerializer.Deserialize<ProxySettingsSnapshot>(File.ReadAllText(recoveryPath));
+                recovered &= snapshot != null && SystemProxyManager.RestoreSettings(snapshot);
+            }
         }
-        catch { }
-        finally
+        catch { recovered = false; }
+
+        snapshot = null;
+        SystemProxyManager.SetChromiumQuicAllowed(true);
+        recovered &= SystemProxyManager.SetBrowserQuicBlocked(false);
+        recovered &= SystemProxyManager.SetIpv6Blocked(false);
+        recovered &= SystemProxyManager.SetLanDnsBlocked(false);
+        recovered &= SystemProxyManager.SetKillSwitchBlocked(false);
+        if (recovered)
         {
-            snapshot = null;
             DeleteRecoveryFile();
-            SystemProxyManager.SetChromiumQuicAllowed(true);
-            SystemProxyManager.SetBrowserQuicBlocked(false);
-            SystemProxyManager.SetIpv6Blocked(false);
-            SystemProxyManager.SetLanDnsBlocked(false);
-            SystemProxyManager.SetKillSwitchBlocked(false);
         }
+        else
+            Console.WriteLine("Network recovery was incomplete; saved state retained for the next launch.");
     }
 
     public void Begin()
     {
         snapshot = SystemProxyManager.CaptureSettings();
-        File.WriteAllText(recoveryPath, JsonSerializer.Serialize(snapshot));
+        var temporaryPath = recoveryPath + ".tmp";
+        File.WriteAllText(temporaryPath, JsonSerializer.Serialize(snapshot));
+        File.Move(temporaryPath, recoveryPath, true);
     }
 
     public void Complete()
@@ -48,14 +56,25 @@ internal sealed class NetworkStateGuard
 
     public void Restore()
     {
+        bool restored = snapshot == null;
         try
         {
-            if (snapshot != null) SystemProxyManager.RestoreSettings(snapshot);
+            if (snapshot == null && File.Exists(recoveryPath))
+            {
+                snapshot = JsonSerializer.Deserialize<ProxySettingsSnapshot>(File.ReadAllText(recoveryPath));
+                restored = snapshot != null;
+            }
+            if (snapshot != null) restored = SystemProxyManager.RestoreSettings(snapshot);
         }
         finally
         {
-            snapshot = null;
-            DeleteRecoveryFile();
+            if (restored)
+            {
+                snapshot = null;
+                DeleteRecoveryFile();
+            }
+            else
+                Console.WriteLine("Network settings were not fully restored; saved state retained for the next launch.");
         }
     }
 
