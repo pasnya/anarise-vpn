@@ -61,7 +61,7 @@ fi
 
 echo "ANARISE VPN successfully packaged into: $APP_BUNDLE"
 
-# 5. Create DMG installer with Applications symlink and Gatekeeper helper script
+# 5. Create DMG installer with Applications symlink and clear instruction file
 DMG_STAGING="$SCRIPT_DIR/dmg-staging-$ARCH"
 DMG_OUTPUT="$SCRIPT_DIR/AnariseVPN-macOS-$ARCH.dmg"
 
@@ -70,20 +70,22 @@ mkdir -p "$DMG_STAGING"
 cp -R "$APP_BUNDLE" "$DMG_STAGING/"
 ln -s /Applications "$DMG_STAGING/Applications"
 
-cat > "$DMG_STAGING/Установить и Открыть Anarise.command" << 'EOF'
-#!/bin/bash
-set -e
-DIR="$(cd "$(dirname "$0")" && pwd)"
-echo "Установка ANARISE VPN в /Applications..."
-rm -rf "/Applications/Anarise.app"
-cp -R "$DIR/Anarise.app" "/Applications/Anarise.app"
-echo "Снятие карантина Gatekeeper (com.apple.quarantine)..."
-xattr -cr "/Applications/Anarise.app" || true
-codesign --force --deep --sign - "/Applications/Anarise.app" >/dev/null 2>&1 || true
-echo "Запуск ANARISE VPN..."
-open "/Applications/Anarise.app"
+cat > "$DMG_STAGING/ИНСТРУКЦИЯ ПО УСТАНОВКЕ.txt" << 'EOF'
+УСТАНОВКА ANARISE VPN НА MACOS:
+================================
+
+1. Перетащите иконку «Anarise» в папку «Applications» (Программы).
+
+2. ПЕРВЫЙ ЗАПУСК НА СОВРЕМЕННЫХ MACOS (Sequoia, Sonoma, Ventura):
+   - Откройте папку «Программы» и запустите Anarise.
+   - Если система покажет сообщение безопасности, нажмите «Готово» / «ОК».
+   - Перейдите в «Системные настройки» -> «Конфиденциальность и безопасность».
+   - Внизу в блоке «Безопасность» нажмите кнопку «Всё равно открыть» (Open Anyway).
+
+Либо в Терминале выполните:
+xattr -cr /Applications/Anarise.app
+================================
 EOF
-chmod +x "$DMG_STAGING/Установить и Открыть Anarise.command"
 
 if command -v hdiutil >/dev/null 2>&1; then
   echo "Creating DMG image: $DMG_OUTPUT..."
