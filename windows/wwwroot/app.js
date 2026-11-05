@@ -20,6 +20,7 @@ let appState = {
         proxyAuthEnabled: true,
         proxyUsername: '',
         proxyPassword: '',
+        geoRoutingRules: '',
         vpnMode: false,
         systemProxy: true
     },
@@ -267,6 +268,9 @@ document.addEventListener('DOMContentLoaded', () => {
         if (val >= 1 && val <= 65535) {
             sendToHost('saveSetting', { name: 'httpPort', value: val });
         }
+    });
+    document.getElementById('input-geo-routing-rules').addEventListener('change', (e) => {
+        sendToHost('saveSetting', { name: 'geoRoutingRules', value: e.target.value });
     });
 
     // Update dialog buttons
@@ -533,6 +537,7 @@ function syncSettingsUi() {
     document.getElementById('chk-proxy-auth').checked = appState.settings.proxyAuthEnabled !== false;
     document.getElementById('input-proxy-user').value = appState.settings.proxyUsername || '';
     document.getElementById('input-proxy-password').value = appState.settings.proxyPassword || '';
+    document.getElementById('input-geo-routing-rules').value = appState.settings.geoRoutingRules || '';
     updateVpnModeUi(appState.settings.vpnMode);
 }
 

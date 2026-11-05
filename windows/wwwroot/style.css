@@ -728,6 +728,25 @@ body {
     border-color: var(--color-primary);
 }
 
+.geo-routing-card {
+    align-items: stretch;
+}
+
+.geo-routing-card .setting-info {
+    padding-right: 0;
+}
+
+.geo-routing-input {
+    width: 100%;
+    min-height: 112px;
+    margin-top: 8px;
+    resize: vertical;
+    text-align: left;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
 /* TOGGLE SWITCH */
 .toggle-switch {
     position: relative;

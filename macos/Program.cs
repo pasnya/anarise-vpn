@@ -69,8 +69,10 @@ public sealed class MacAppController
 {
     private PhotinoWindow? window;
     private Process? coreProcess;
+    private Process? routingProcess;
     private Process? tun2socksProcess;
     private readonly CoreProcessManager coreManager = new();
+    private readonly CoreProcessManager routingManager = new();
     private readonly StatisticsService statsService = new();
     private readonly string appDataDir;
     private readonly string settingsPath;
@@ -89,6 +91,10 @@ public sealed class MacAppController
     private int socksPort = 20808;
     private int httpPort = 20809;
     private bool proxyAuthEnabled = true;
+    private bool activeEnableHttpProxy = true;
+    private string geoRoutingRules = "";
+    private int upstreamSocksPort;
+    private int upstreamHttpPort;
     private string proxyUsername = LocalProxyCredentials.Create(10);
     private string proxyPassword = LocalProxyCredentials.Create();
     private MacProxySettingsSnapshot? originalProxySettings;
@@ -117,7 +123,7 @@ public sealed class MacAppController
     private Task? binariesSetupTask;
     private bool updateChecked;
 
-    private const string AppVersion = "1.4.19";
+    private const string AppVersion = "1.4.20";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
@@ -311,6 +317,7 @@ public sealed class MacAppController
                 proxyAuthEnabled,
                 proxyUsername,
                 proxyPassword,
+                geoRoutingRules,
                 vpnMode,
                 systemProxy
             }
@@ -385,12 +392,32 @@ public sealed class MacAppController
 
             bool isHysteria = LinkParser.IsHysteria2Config(parsedConfig);
             bool isMieru = LinkParser.IsMieruConfig(parsedConfig);
+            IReadOnlyList<GeoRoutingRule> configuredGeoRules;
+            try { configuredGeoRules = GeoRouting.Parse(geoRoutingRules); }
+            catch (FormatException ex)
+            {
+                LogToUi("Ошибка geo-маршрутизации: " + ex.Message);
+                if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                return;
+            }
+            bool requiresRoutingCore = configuredGeoRules.Count > 0 && (isHysteria || isMieru);
+            if (configuredGeoRules.Count > 0)
+                LogToUi($"Загружено geo-правил: {configuredGeoRules.Count}.");
+            activeEnableHttpProxy = !isMieru || requiresRoutingCore;
             string coreBinaryName = isMieru ? "mieru" : isHysteria ? "hysteria" : "xray";
             string coreBinaryPath = Path.Combine(binariesDir, coreBinaryName);
 
             if (!File.Exists(coreBinaryPath))
             {
                 LogToUi($"Модуль ядра {coreBinaryName} не найден по пути {coreBinaryPath}.");
+                if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                return;
+            }
+
+            string xrayPath = Path.Combine(binariesDir, "xray");
+            if (requiresRoutingCore && !File.Exists(xrayPath))
+            {
+                LogToUi("Для geo-маршрутизации Hysteria2/Mieru не найден Xray.");
                 if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
                 return;
             }
@@ -476,8 +503,20 @@ public sealed class MacAppController
 
             string configFilePath = Path.Combine(appDataDir,
                 isMieru ? "mieru_config.json" : isHysteria ? "hysteria_config.json" : "xray_config.json");
-            string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria,
-                proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
+            string finalCoreConfig;
+            if (requiresRoutingCore)
+            {
+                (upstreamSocksPort, upstreamHttpPort) = FindRoutingUpstreamPorts();
+                finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, upstreamSocksPort, upstreamHttpPort, isMieru, isHysteria);
+            }
+            else
+            {
+                finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria,
+                    proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
+                if (!isHysteria && !isMieru)
+                    finalCoreConfig = GeoRouting.ApplyToXrayConfig(finalCoreConfig, geoRoutingRules,
+                        vpnMode ? activePhysicalInterfaceName : null);
+            }
             File.WriteAllText(configFilePath, finalCoreConfig);
 
             if (gen != connectionGeneration) return;
@@ -514,6 +553,41 @@ public sealed class MacAppController
                 return;
             }
 
+            if (requiresRoutingCore)
+            {
+                string routingConfigPath = Path.Combine(appDataDir, "geo_router_config.json");
+                string routingConfig = GeoRouting.BuildRouterConfig(socksPort, httpPort, upstreamSocksPort,
+                    proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null, geoRoutingRules, activePhysicalInterfaceName);
+                File.WriteAllText(routingConfigPath, routingConfig);
+                if (OperatingSystem.IsMacOS())
+                    File.SetUnixFileMode(routingConfigPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                var routerStartInfo = new ProcessStartInfo
+                {
+                    FileName = xrayPath,
+                    Arguments = $"-c \"{routingConfigPath}\"",
+                    WorkingDirectory = binariesDir,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = Encoding.UTF8,
+                    StandardErrorEncoding = Encoding.UTF8
+                };
+                routerStartInfo.Environment["GOMEMLIMIT"] = "30MiB";
+                routerStartInfo.Environment["GOGC"] = "30";
+                routingProcess = routingManager.Start(routerStartInfo, LogToUi, LogToUi);
+                await Task.Delay(1000);
+                if (gen != connectionGeneration) return;
+                if (routingProcess.HasExited)
+                {
+                    LogToUi("Общий geo-маршрутизатор Xray неожиданно завершился.");
+                    StopTunnelCore();
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                    return;
+                }
+                LogToUi("Общий geo-маршрутизатор активен для Hysteria2/Mieru.");
+            }
+
             originalDnsServers ??= MacProxyManager.GetDnsServers();
             originalProxySettings ??= MacProxyManager.CaptureSettings();
             var originalDns = originalDnsServers;
@@ -539,7 +613,7 @@ public sealed class MacAppController
                 if (!MacNetworkStateGuard.RecordSession(true, killSwitch, MacProxyManager.GetActiveService(), originalDnsServers: originalDns,
                     originalProxySettings: originalProxySettings))
                     throw new IOException("Не удалось сохранить состояние сети для аварийного восстановления.");
-                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan, enableHttpProxy: !isMieru,
+                MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan, enableHttpProxy: activeEnableHttpProxy,
                     username: proxyAuthEnabled ? proxyUsername : null, password: proxyAuthEnabled ? proxyPassword : null);
             }
 
@@ -631,9 +705,31 @@ public sealed class MacAppController
 
     private void StopTunnelCore()
     {
+        routingManager.Stop();
+        routingProcess = null;
         coreManager.Stop();
         coreProcess = null;
         isConnected = false;
+    }
+
+    private (int SocksPort, int HttpPort) FindRoutingUpstreamPorts()
+    {
+        var excluded = new HashSet<int> { socksPort, httpPort, 20810 };
+        int socks = FindFreePort(31000, requireUdp: true, excluded);
+        excluded.Add(socks);
+        int http = FindFreePort(socks + 1, requireUdp: false, excluded);
+        return (socks, http);
+    }
+
+    private static int FindFreePort(int start, bool requireUdp, HashSet<int> excluded)
+    {
+        for (int offset = 0; offset < 2000; offset++)
+        {
+            int candidate = 31000 + ((start - 31000 + offset) % 30000);
+            if (!excluded.Contains(candidate) && DesktopCoreServices.IsLocalPortAvailable(candidate, requireUdp))
+                return candidate;
+        }
+        throw new InvalidOperationException("Не удалось найти свободный внутренний порт маршрутизатора.");
     }
 
     // --- TUN2SOCKS FOR MACOS ---
@@ -732,7 +828,8 @@ public sealed class MacAppController
     {
         if (!isConnected) return;
 
-        if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode && tun2socksProcess != null))
+        if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode && tun2socksProcess != null) ||
+            (routingProcess != null && routingProcess.HasExited))
         {
             LogToUi("VPN-ядро неожиданно завершилось.");
             Disconnect(preserveKillSwitch: true);
@@ -1356,7 +1453,7 @@ public sealed class MacAppController
 
     private void CleanupRuntimeConfigFiles()
     {
-        foreach (var fileName in new[] { "config.json", "xray_config.json", "hysteria_config.json", "mieru_config.json" })
+        foreach (var fileName in new[] { "config.json", "xray_config.json", "hysteria_config.json", "mieru_config.json", "geo_router_config.json" })
         {
             try
             {
@@ -1390,6 +1487,7 @@ public sealed class MacAppController
                 if (isConnected && !vpnMode && systemProxy)
                 {
                     MacProxyManager.SetProxy(true, socksPort, httpPort, bypassLan,
+                        enableHttpProxy: activeEnableHttpProxy,
                         username: proxyAuthEnabled ? proxyUsername : null, password: proxyAuthEnabled ? proxyPassword : null);
                 }
                 break;
@@ -1398,12 +1496,28 @@ public sealed class MacAppController
                 if (isConnected && !vpnMode)
                 {
                     MacProxyManager.SetProxy(systemProxy, socksPort, httpPort, bypassLan,
+                        enableHttpProxy: activeEnableHttpProxy,
                         username: proxyAuthEnabled ? proxyUsername : null, password: proxyAuthEnabled ? proxyPassword : null);
                 }
                 break;
             case "proxyAuthEnabled":
                 proxyAuthEnabled = val.GetValue<bool>();
                 if (isConnected) LogToUi("Аутентификация применяется при следующем подключении.");
+                break;
+            case "geoRoutingRules":
+                try
+                {
+                    string rules = val.GetValue<string>() ?? "";
+                    GeoRouting.Parse(rules);
+                    geoRoutingRules = rules;
+                    if (isConnected) LogToUi("Geo-правила сохранены и применятся при следующем подключении.");
+                }
+                catch (FormatException ex)
+                {
+                    LogToUi("Geo-правила не сохранены: " + ex.Message);
+                    PostToUi(new { action = "showToast", message = "Проверьте формат geo-правил" });
+                    PostToUi(new { action = "updateSettings", settings = new { geoRoutingRules } });
+                }
                 break;
             case "vpnMode":
                 vpnMode = val.GetValue<bool>();
@@ -1445,6 +1559,7 @@ public sealed class MacAppController
                     proxyAuthEnabled = doc["proxyAuthEnabled"]?.GetValue<bool>() ?? true;
                     proxyUsername = doc["proxyUsername"]?.ToString() ?? proxyUsername;
                     proxyPassword = doc["proxyPassword"]?.ToString() ?? proxyPassword;
+                    geoRoutingRules = doc["geoRoutingRules"]?.ToString() ?? "";
                     currentConfigLink = doc["currentConfigLink"]?.ToString() ?? "";
                 }
             }
@@ -1469,6 +1584,7 @@ public sealed class MacAppController
                 ["proxyAuthEnabled"] = proxyAuthEnabled,
                 ["proxyUsername"] = proxyUsername,
                 ["proxyPassword"] = proxyPassword,
+                ["geoRoutingRules"] = geoRoutingRules,
                 ["currentConfigLink"] = currentConfigLink
             };
             SecureStorage.Write(settingsPath, node.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));

@@ -28,6 +28,7 @@
     <Compile Include="..\windows\SecureStorage.cs" Link="SecureStorage.cs" />
     <Compile Include="..\windows\LocalProxyCredentials.cs" Link="LocalProxyCredentials.cs" />
     <Compile Include="..\windows\MacKeychainStore.cs" Link="MacKeychainStore.cs" />
+    <Compile Include="..\windows\GeoRouting.cs" Link="GeoRouting.cs" />
   </ItemGroup>
 
   <ItemGroup>

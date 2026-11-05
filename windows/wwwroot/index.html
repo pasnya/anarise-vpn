@@ -284,6 +284,16 @@
                     <input type="text" id="input-proxy-password" class="setting-input credential-input" readonly>
                 </div>
 
+                <div class="settings-section-title">Геомаршрутизация</div>
+                <div class="setting-card geo-routing-card">
+                    <div class="setting-info">
+                        <span class="setting-title">Правила GeoIP / GeoSite</span>
+                        <span class="setting-desc">По одному правилу на строку. Пусто — весь трафик идёт через VPN. Применяется после переподключения.</span>
+                        <span class="setting-desc">Формат: geosite:category-ru=direct, geoip:us=proxy или geosite:category-ads-all=block</span>
+                        <textarea id="input-geo-routing-rules" class="setting-input geo-routing-input" spellcheck="false" placeholder="geosite:category-ru=direct&#10;geoip:us=proxy"></textarea>
+                    </div>
+                </div>
+
                 <div class="settings-section-title">Основные</div>
 
                 <div class="setting-card">

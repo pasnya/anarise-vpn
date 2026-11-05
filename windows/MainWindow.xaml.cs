@@ -22,6 +22,8 @@ namespace Anarise
     {
         private Process? coreProcess = null;
         private readonly CoreProcessManager coreProcessManager = new();
+        private Process? routingProcess = null;
+        private readonly CoreProcessManager routingProcessManager = new();
         private bool isConnected = false;
         private string currentConfigLink = "";
         private List<string> configHistory = new List<string>();
@@ -42,11 +44,14 @@ namespace Anarise
         private int socksPort = 20808;
         private int httpPort = 20809;
         private bool proxyAuthEnabled = true;
+        private string geoRoutingRules = "";
+        private int upstreamSocksPort;
+        private int upstreamHttpPort;
         private string proxyUsername = LocalProxyCredentials.Create(10);
         private string proxyPassword = LocalProxyCredentials.Create();
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.19";
+        private const string AppVersion = "1.4.20";
         private const string RequiredXrayVersion = "26.7.11";
         // Binary downloads can be several dozen megabytes and may be throttled by
         // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
@@ -262,6 +267,10 @@ namespace Anarise
                                 int portVal = node?["value"]?.AsValue().GetValue<int>() ?? 0;
                                 UpdatePortSetting(sName, portVal);
                             }
+                            else if (sName == "geoRoutingRules")
+                            {
+                                UpdateGeoRoutingRules(node?["value"]?.ToString() ?? "");
+                            }
                             else
                             {
                                 bool sVal = node?["value"]?.AsValue().GetValue<bool>() ?? false;
@@ -357,9 +366,21 @@ namespace Anarise
 
                 bool isHysteria = LinkParser.IsHysteria2Config(parsedConfig);
                 bool isMieru = LinkParser.IsMieruConfig(parsedConfig);
+                IReadOnlyList<GeoRoutingRule> configuredGeoRules;
+                try { configuredGeoRules = GeoRouting.Parse(geoRoutingRules); }
+                catch (FormatException ex)
+                {
+                    LogToUi("Ошибка geo-маршрутизации: " + ex.Message);
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                    return;
+                }
+                bool requiresRoutingCore = configuredGeoRules.Count > 0 && (isHysteria || isMieru);
+                if (configuredGeoRules.Count > 0)
+                    LogToUi($"Загружено geo-правил: {configuredGeoRules.Count}.");
                 bool useNativeXrayTun = vpnMode && !isHysteria && !isMieru;
                 string executable = isMieru ? "mieru.exe" : (isHysteria ? "hysteria.exe" : "xray.exe");
                 string exePath = Path.Combine(binariesPath, executable);
+                string xrayPath = Path.Combine(binariesPath, "xray.exe");
 
                 if (!isMieru && !isHysteria && !IsXrayVersionAtLeast(exePath, RequiredXrayVersion))
                 {
@@ -371,6 +392,13 @@ namespace Anarise
                 if (!File.Exists(exePath))
                 {
                     LogToUi($"Критическая ошибка: файл ядра {executable} не найден по пути {exePath}");
+                    if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                    return;
+                }
+
+                if (requiresRoutingCore && !IsXrayVersionAtLeast(xrayPath, RequiredXrayVersion))
+                {
+                    LogToUi($"Geo-маршрутизация для Hysteria2/Mieru требует Xray {RequiredXrayVersion} или новее.");
                     if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
                     return;
                 }
@@ -520,8 +548,20 @@ namespace Anarise
                 // Write configuration file
                 string configPath = Path.Combine(appDataPath,
                     isMieru ? "mieru_config.json" : (isHysteria ? "hysteria_config.json" : "xray_config.json"));
-                string finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria,
-                    proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
+                string finalCoreConfig;
+                if (requiresRoutingCore)
+                {
+                    (upstreamSocksPort, upstreamHttpPort) = FindRoutingUpstreamPorts();
+                    finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, upstreamSocksPort, upstreamHttpPort, isMieru, isHysteria);
+                }
+                else
+                {
+                    finalCoreConfig = DesktopCoreServices.BuildRuntimeCoreConfig(parsedConfig, socksPort, httpPort, isMieru, isHysteria,
+                        proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null);
+                    if (!isHysteria && !isMieru)
+                        finalCoreConfig = GeoRouting.ApplyToXrayConfig(finalCoreConfig, geoRoutingRules,
+                            vpnMode ? activePhysicalInterfaceName : null);
+                }
                 File.WriteAllText(configPath, finalCoreConfig);
 
                 if (gen != connectionGeneration) return;
@@ -558,6 +598,39 @@ namespace Anarise
                     LogToUi("Процесс ядра неожиданно завершился.");
                     PostToUi(new { action = "updateState", state = "ERROR" });
                     return;
+                }
+
+                if (requiresRoutingCore)
+                {
+                    string routingConfigPath = Path.Combine(appDataPath, "geo_router_config.json");
+                    string routingConfig = GeoRouting.BuildRouterConfig(socksPort, httpPort, upstreamSocksPort,
+                        proxyAuthEnabled ? proxyUsername : null, proxyAuthEnabled ? proxyPassword : null, geoRoutingRules, activePhysicalInterfaceName);
+                    File.WriteAllText(routingConfigPath, routingConfig);
+                    var routerStartInfo = new ProcessStartInfo
+                    {
+                        FileName = xrayPath,
+                        Arguments = $"-c \"{routingConfigPath}\"",
+                        WorkingDirectory = binariesPath,
+                        CreateNoWindow = true,
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        StandardOutputEncoding = Encoding.UTF8,
+                        StandardErrorEncoding = Encoding.UTF8
+                    };
+                    routerStartInfo.Environment["GOMEMLIMIT"] = "30MiB";
+                    routerStartInfo.Environment["GOGC"] = "30";
+                    routingProcess = routingProcessManager.Start(routerStartInfo, LogToUi, LogToUi);
+                    await Task.Delay(1000);
+                    if (gen != connectionGeneration) return;
+                    if (routingProcess.HasExited)
+                    {
+                        LogToUi("Общий geo-маршрутизатор Xray неожиданно завершился.");
+                        StopTunnelCore();
+                        if (gen == connectionGeneration) PostToUi(new { action = "updateState", state = "ERROR" });
+                        return;
+                    }
+                    LogToUi("Общий geo-маршрутизатор активен для Hysteria2/Mieru.");
                 }
 
                 if (useNativeXrayTun)
@@ -697,9 +770,31 @@ namespace Anarise
 
         private void StopTunnelCore()
         {
+            routingProcessManager.Stop();
+            routingProcess = null;
             coreProcessManager.Stop();
             coreProcess = null;
             isConnected = false;
+        }
+
+        private (int SocksPort, int HttpPort) FindRoutingUpstreamPorts()
+        {
+            var excluded = new HashSet<int> { socksPort, httpPort, 20810 };
+            int socks = FindFreePort(31000, requireUdp: true, excluded);
+            excluded.Add(socks);
+            int http = FindFreePort(socks + 1, requireUdp: false, excluded);
+            return (socks, http);
+        }
+
+        private static int FindFreePort(int start, bool requireUdp, HashSet<int> excluded)
+        {
+            for (int offset = 0; offset < 2000; offset++)
+            {
+                int candidate = 31000 + ((start - 31000 + offset) % 30000);
+                if (!excluded.Contains(candidate) && DesktopCoreServices.IsLocalPortAvailable(candidate, requireUdp))
+                    return candidate;
+            }
+            throw new InvalidOperationException("Не удалось найти свободный внутренний порт маршрутизатора.");
         }
 
         // --- TUN2SOCKS VPN TUNNEL ---
@@ -1001,6 +1096,7 @@ namespace Anarise
                             proxyAuthEnabled,
                             proxyUsername,
                             proxyPassword,
+                            geoRoutingRules,
                             vpnMode,
                             systemProxy
                         }
@@ -1130,7 +1226,8 @@ namespace Anarise
         {
             if (!isConnected) return;
 
-            if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode && tun2socksProcess != null))
+            if (!CoreHealthMonitor.IsHealthy(coreProcess, tun2socksProcess, vpnMode && tun2socksProcess != null) ||
+                (routingProcess != null && routingProcess.HasExited))
             {
                 LogToUi("VPN-ядро или tun2socks неожиданно завершилось.");
                 StopConnection(preserveKillSwitch: true);
@@ -1706,7 +1803,7 @@ namespace Anarise
 
         private void CleanupRuntimeConfigFiles()
         {
-            foreach (var fileName in new[] { "xray_config.json", "hysteria_config.json", "mieru_config.json" })
+            foreach (var fileName in new[] { "xray_config.json", "hysteria_config.json", "mieru_config.json", "geo_router_config.json" })
             {
                 try
                 {
@@ -1813,6 +1910,7 @@ namespace Anarise
                         if (settings.TryGetValue("proxyAuthEnabled", out var auth) && auth != null) proxyAuthEnabled = Convert.ToBoolean(auth.ToString());
                         if (settings.TryGetValue("proxyUsername", out var username) && username != null) proxyUsername = username.ToString() ?? proxyUsername;
                         if (settings.TryGetValue("proxyPassword", out var password) && password != null) proxyPassword = password.ToString() ?? proxyPassword;
+                        if (settings.TryGetValue("geoRoutingRules", out var geoRules) && geoRules != null) geoRoutingRules = geoRules.ToString() ?? "";
                         if (settings.TryGetValue("vpnMode", out var valVm) && valVm != null) vpnMode = Convert.ToBoolean(valVm.ToString());
                         if (settings.TryGetValue("systemProxy", out var valSp2) && valSp2 != null) systemProxy = Convert.ToBoolean(valSp2.ToString());
                     }
@@ -1835,6 +1933,7 @@ namespace Anarise
                 ["proxyAuthEnabled"] = proxyAuthEnabled,
                 ["proxyUsername"] = proxyUsername,
                 ["proxyPassword"] = proxyPassword,
+                ["geoRoutingRules"] = geoRoutingRules,
                 ["vpnMode"] = vpnMode,
                 ["systemProxy"] = systemProxy
             };
@@ -1891,6 +1990,7 @@ namespace Anarise
                 proxyAuthEnabled = proxyAuthEnabled,
                 proxyUsername = proxyUsername,
                 proxyPassword = proxyPassword,
+                geoRoutingRules = geoRoutingRules,
                 vpnMode = vpnMode,
                 systemProxy = systemProxy
             };
@@ -1980,6 +2080,23 @@ namespace Anarise
                 case "httpPort": httpPort = val; break;
             }
             SaveSettings();
+        }
+
+        private void UpdateGeoRoutingRules(string value)
+        {
+            try
+            {
+                GeoRouting.Parse(value);
+                geoRoutingRules = value;
+                SaveSettings();
+                if (isConnected) LogToUi("Geo-правила сохранены и применятся при следующем подключении.");
+            }
+            catch (FormatException ex)
+            {
+                LogToUi("Geo-правила не сохранены: " + ex.Message);
+                PostToUi(new { action = "showToast", message = "Проверьте формат geo-правил" });
+                PostToUi(new { action = "updateSettings", settings = new { geoRoutingRules } });
+            }
         }
 
         private void SetAutostartRegistry(bool enable)
