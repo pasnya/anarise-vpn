@@ -38,6 +38,42 @@ let appState = {
     serverRegion: 'all'
 };
 
+const GEO_IP_CHOICES = [
+    { value: 'ru', label: 'Россия (RU)' },
+    { value: 'us', label: 'США (US)' },
+    { value: 'de', label: 'Германия (DE)' },
+    { value: 'gb', label: 'Великобритания (GB)' },
+    { value: 'fr', label: 'Франция (FR)' },
+    { value: 'nl', label: 'Нидерланды (NL)' },
+    { value: 'fi', label: 'Финляндия (FI)' },
+    { value: 'pl', label: 'Польша (PL)' },
+    { value: 'tr', label: 'Турция (TR)' },
+    { value: 'ua', label: 'Украина (UA)' },
+    { value: 'kz', label: 'Казахстан (KZ)' },
+    { value: 'cn', label: 'Китай (CN)' },
+    { value: 'jp', label: 'Япония (JP)' },
+    { value: 'ca', label: 'Канада (CA)' },
+    { value: 'au', label: 'Австралия (AU)' }
+];
+
+const GEO_SITE_CHOICES = [
+    { value: 'category-ru', label: 'Сайты России' },
+    { value: 'cn', label: 'Сайты Китая' },
+    { value: 'geolocation-!cn', label: 'Сайты вне Китая' },
+    { value: 'category-ads-all', label: 'Реклама' },
+    { value: 'google', label: 'Google' },
+    { value: 'youtube', label: 'YouTube' },
+    { value: 'netflix', label: 'Netflix' },
+    { value: 'telegram', label: 'Telegram' },
+    { value: 'twitter', label: 'X / Twitter' },
+    { value: 'facebook', label: 'Facebook' },
+    { value: 'github', label: 'GitHub' },
+    { value: 'apple', label: 'Apple' },
+    { value: 'microsoft', label: 'Microsoft' }
+];
+
+const GEO_ACTION_LABELS = { proxy: 'через VPN', direct: 'напрямую', block: 'заблокировать' };
+
 // --- WEBVIEW2 / PHOTINO COMMUNICATION BRIDGE ---
 function sendToHost(action, data = {}) {
     const payload = { action, ...data };
@@ -48,6 +84,102 @@ function sendToHost(action, data = {}) {
     } else {
         console.log("Mock sending to host:", action, data);
     }
+}
+
+function updateGeoRuleChoices() {
+    const typeSelect = document.getElementById('geo-rule-type');
+    const valueSelect = document.getElementById('geo-rule-value');
+    if (!typeSelect || !valueSelect) return;
+    const choices = typeSelect.value === 'geoip' ? GEO_IP_CHOICES : GEO_SITE_CHOICES;
+    valueSelect.replaceChildren();
+    choices.forEach(choice => {
+        const option = document.createElement('option');
+        option.value = choice.value;
+        option.textContent = choice.label;
+        valueSelect.appendChild(option);
+    });
+    updateGeoRulePreview();
+}
+
+function updateGeoRulePreview() {
+    const type = document.getElementById('geo-rule-type')?.value || 'geosite';
+    const value = document.getElementById('geo-rule-value')?.value || 'category-ru';
+    const action = document.getElementById('geo-rule-action')?.value || 'direct';
+    const preview = document.getElementById('geo-rule-preview');
+    if (preview) preview.textContent = `${type}:${value}=${action}`;
+}
+
+function renderGeoRulesList() {
+    const textarea = document.getElementById('input-geo-routing-rules');
+    const list = document.getElementById('geo-rules-list');
+    if (!textarea || !list) return;
+    list.replaceChildren();
+    const entries = textarea.value.split(/\r?\n/)
+        .map((line, index) => ({ line: line.trim(), index }))
+        .filter(entry => entry.line && !entry.line.startsWith('#'));
+
+    if (entries.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'setting-desc';
+        empty.textContent = 'Пока правил нет.';
+        list.appendChild(empty);
+        return;
+    }
+
+    entries.forEach(entry => {
+        const row = document.createElement('div');
+        row.className = 'geo-rule-item';
+        const summary = document.createElement('div');
+        summary.className = 'geo-rule-summary';
+        const [matcher = '', action = ''] = entry.line.split('=', 2);
+        const [type = '', value = ''] = matcher.split(':', 2);
+        const choices = type === 'geoip' ? GEO_IP_CHOICES : GEO_SITE_CHOICES;
+        const choice = choices.find(item => item.value === value);
+        const title = document.createElement('span');
+        title.textContent = `${choice?.label || matcher} — ${GEO_ACTION_LABELS[action] || action || 'действие не задано'}`;
+        const code = document.createElement('code');
+        code.textContent = entry.line;
+        summary.append(title, code);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'geo-rule-remove';
+        remove.title = 'Удалить правило';
+        remove.setAttribute('aria-label', 'Удалить правило');
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+            const lines = textarea.value.split(/\r?\n/);
+            lines.splice(entry.index, 1);
+            saveGeoRoutingRules(lines.join('\n'));
+        });
+        row.append(summary, remove);
+        list.appendChild(row);
+    });
+}
+
+function saveGeoRoutingRules(value) {
+    const textarea = document.getElementById('input-geo-routing-rules');
+    if (!textarea) return;
+    textarea.value = value;
+    renderGeoRulesList();
+    sendToHost('saveSetting', { name: 'geoRoutingRules', value });
+}
+
+function addGeoRoutingRule() {
+    const textarea = document.getElementById('input-geo-routing-rules');
+    const rule = document.getElementById('geo-rule-preview')?.textContent || '';
+    if (!textarea || !rule) return;
+    const matcher = rule.split('=')[0].toLowerCase();
+    const existing = textarea.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    if (existing.some(line => line.split('=')[0].toLowerCase() === matcher)) {
+        showToast('Для этой категории правило уже добавлено');
+        return;
+    }
+    if (existing.filter(line => !line.startsWith('#')).length >= 32) {
+        showToast('Можно добавить не более 32 правил');
+        return;
+    }
+    existing.push(rule);
+    saveGeoRoutingRules(existing.join('\n'));
 }
 
 // Receive messages from C# host
@@ -270,8 +402,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
     document.getElementById('input-geo-routing-rules').addEventListener('change', (e) => {
+        renderGeoRulesList();
         sendToHost('saveSetting', { name: 'geoRoutingRules', value: e.target.value });
     });
+    document.getElementById('geo-rule-type').addEventListener('change', updateGeoRuleChoices);
+    document.getElementById('geo-rule-value').addEventListener('change', updateGeoRulePreview);
+    document.getElementById('geo-rule-action').addEventListener('change', updateGeoRulePreview);
+    document.getElementById('btn-add-geo-rule').addEventListener('click', addGeoRoutingRule);
+    updateGeoRuleChoices();
+    renderGeoRulesList();
 
     // Update dialog buttons
     document.getElementById('btn-update-cancel').addEventListener('click', () => {
@@ -538,6 +677,8 @@ function syncSettingsUi() {
     document.getElementById('input-proxy-user').value = appState.settings.proxyUsername || '';
     document.getElementById('input-proxy-password').value = appState.settings.proxyPassword || '';
     document.getElementById('input-geo-routing-rules').value = appState.settings.geoRoutingRules || '';
+    updateGeoRuleChoices();
+    renderGeoRulesList();
     updateVpnModeUi(appState.settings.vpnMode);
 }
 

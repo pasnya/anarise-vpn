@@ -287,10 +287,37 @@
                 <div class="settings-section-title">Геомаршрутизация</div>
                 <div class="setting-card geo-routing-card">
                     <div class="setting-info">
-                        <span class="setting-title">Правила GeoIP / GeoSite</span>
-                        <span class="setting-desc">По одному правилу на строку. Пусто — весь трафик идёт через VPN. Применяется после переподключения.</span>
-                        <span class="setting-desc">Формат: geosite:category-ru=direct, geoip:us=proxy или geosite:category-ads-all=block</span>
-                        <textarea id="input-geo-routing-rules" class="setting-input geo-routing-input" spellcheck="false" placeholder="geosite:category-ru=direct&#10;geoip:us=proxy"></textarea>
+                        <span class="setting-title">Куда направлять сайты и страны</span>
+                        <span class="setting-desc">Добавьте правило: выберите тип, категорию и маршрут. Без правил весь трафик идёт через VPN.</span>
+                    </div>
+                    <div class="geo-rule-builder">
+                        <div class="geo-rule-fields">
+                            <label>Тип
+                                <select id="geo-rule-type" class="geo-routing-select">
+                                    <option value="geosite">Сайт или категория</option>
+                                    <option value="geoip">Страна по IP</option>
+                                </select>
+                            </label>
+                            <label>Что найти
+                                <select id="geo-rule-value" class="geo-routing-select"></select>
+                            </label>
+                            <label>Маршрут
+                                <select id="geo-rule-action" class="geo-routing-select">
+                                    <option value="direct">Напрямую</option>
+                                    <option value="proxy">Через VPN</option>
+                                    <option value="block">Заблокировать</option>
+                                </select>
+                            </label>
+                        </div>
+                        <div class="geo-rule-preview">Будет добавлено: <code id="geo-rule-preview"></code></div>
+                        <button type="button" id="btn-add-geo-rule" class="geo-add-rule">Добавить правило</button>
+                        <div id="geo-rules-list" class="geo-rules-list"></div>
+                        <details class="geo-advanced-rules">
+                            <summary>Дополнительно: ввести правило вручную</summary>
+                            <span class="setting-desc">Формат: geosite:category-ru=direct. Действия: proxy, direct, block.</span>
+                            <textarea id="input-geo-routing-rules" class="setting-input geo-routing-input" spellcheck="false" placeholder="geosite:category-ru=direct&#10;geoip:us=proxy"></textarea>
+                        </details>
+                        <span class="setting-desc">Изменения применяются при следующем подключении. GeoSite-категории зависят от списка доменов в geosite.dat.</span>
                     </div>
                 </div>
 
