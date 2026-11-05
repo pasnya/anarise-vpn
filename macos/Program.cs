@@ -770,8 +770,21 @@ public sealed class MacAppController
             await Task.Delay(1500);
             if (tun2socksProcess.HasExited)
             {
-                LogToUi("Для запуска TUN-интерфейса на macOS требуются права администратора (или используйте режим Системного прокси).");
-                return false;
+                LogToUi("Запуск TUN требует системных привилегий. Запрос прав администратора macOS...");
+                try { tun2socksProcess.Dispose(); } catch { }
+                tun2socksProcess = null;
+
+                string proxyArg = (proxyAuthEnabled ? Uri.EscapeDataString(proxyUsername) + ":" + Uri.EscapeDataString(proxyPassword) + "@" : "") + "127.0.0.1:" + socksPort;
+                string tunLogPath = Path.Combine(appDataDir, "tun2socks.log");
+                string launchCmd = $"nohup \"{tunExe}\" -device tun://{utunName} -proxy socks5://{proxyArg} -loglevel warn > \"{tunLogPath}\" 2>&1 &";
+
+                if (!MacProxyManager.RunPrivilegedShell(launchCmd))
+                {
+                    LogToUi("Не удалось получить права администратора для запуска TUN.");
+                    return false;
+                }
+
+                await Task.Delay(1500);
             }
 
             if (!MacNetworkStateGuard.RecordSession(false, killSwitch, MacProxyManager.GetActiveService(), tunRoutesActive: true,
@@ -811,6 +824,7 @@ public sealed class MacAppController
                 proc.Kill(true);
                 proc.WaitForExit(3000);
             }
+            MacProxyManager.RunPrivilegedShell("/usr/bin/killall -9 tun2socks 2>/dev/null || true");
         }
         catch { }
         finally
