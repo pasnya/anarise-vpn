@@ -39,28 +39,28 @@ let appState = {
 };
 
 const GEO_IP_CHOICES = [
-    { value: 'ru', label: 'Ð Ð¾ÑÑÐ¸Ñ (RU)' },
-    { value: 'us', label: 'Ð¡Ð¨Ð (US)' },
-    { value: 'de', label: 'Ð“ÐµÑ€Ð¼Ð°Ð½Ð¸Ñ (DE)' },
-    { value: 'gb', label: 'Ð’ÐµÐ»Ð¸ÐºÐ¾Ð±Ñ€Ð¸Ñ‚Ð°Ð½Ð¸Ñ (GB)' },
-    { value: 'fr', label: 'Ð¤Ñ€Ð°Ð½Ñ†Ð¸Ñ (FR)' },
-    { value: 'nl', label: 'ÐÐ¸Ð´ÐµÑ€Ð»Ð°Ð½Ð´Ñ‹ (NL)' },
-    { value: 'fi', label: 'Ð¤Ð¸Ð½Ð»ÑÐ½Ð´Ð¸Ñ (FI)' },
-    { value: 'pl', label: 'ÐŸÐ¾Ð»ÑŒÑˆÐ° (PL)' },
-    { value: 'tr', label: 'Ð¢ÑƒÑ€Ñ†Ð¸Ñ (TR)' },
-    { value: 'ua', label: 'Ð£ÐºÑ€Ð°Ð¸Ð½Ð° (UA)' },
-    { value: 'kz', label: 'ÐšÐ°Ð·Ð°Ñ…ÑÑ‚Ð°Ð½ (KZ)' },
-    { value: 'cn', label: 'ÐšÐ¸Ñ‚Ð°Ð¹ (CN)' },
-    { value: 'jp', label: 'Ð¯Ð¿Ð¾Ð½Ð¸Ñ (JP)' },
-    { value: 'ca', label: 'ÐšÐ°Ð½Ð°Ð´Ð° (CA)' },
-    { value: 'au', label: 'ÐÐ²ÑÑ‚Ñ€Ð°Ð»Ð¸Ñ (AU)' }
+    { value: 'ru', label: 'Россия (RU)' },
+    { value: 'us', label: 'США (US)' },
+    { value: 'de', label: 'Германия (DE)' },
+    { value: 'gb', label: 'Великобритания (GB)' },
+    { value: 'fr', label: 'Франция (FR)' },
+    { value: 'nl', label: 'Нидерланды (NL)' },
+    { value: 'fi', label: 'Финляндия (FI)' },
+    { value: 'pl', label: 'Польша (PL)' },
+    { value: 'tr', label: 'Турция (TR)' },
+    { value: 'ua', label: 'Украина (UA)' },
+    { value: 'kz', label: 'Казахстан (KZ)' },
+    { value: 'cn', label: 'Китай (CN)' },
+    { value: 'jp', label: 'Япония (JP)' },
+    { value: 'ca', label: 'Канада (CA)' },
+    { value: 'au', label: 'Австралия (AU)' }
 ];
 
 const GEO_SITE_CHOICES = [
-    { value: 'category-ru', label: 'Ð¡Ð°Ð¹Ñ‚Ñ‹ Ð Ð¾ÑÑÐ¸Ð¸' },
-    { value: 'cn', label: 'Ð¡Ð°Ð¹Ñ‚Ñ‹ ÐšÐ¸Ñ‚Ð°Ñ' },
-    { value: 'geolocation-!cn', label: 'Ð¡Ð°Ð¹Ñ‚Ñ‹ Ð²Ð½Ðµ ÐšÐ¸Ñ‚Ð°Ñ' },
-    { value: 'category-ads-all', label: 'Ð ÐµÐºÐ»Ð°Ð¼Ð°' },
+    { value: 'category-ru', label: 'Сайты России' },
+    { value: 'cn', label: 'Сайты Китая' },
+    { value: 'geolocation-!cn', label: 'Сайты вне Китая' },
+    { value: 'category-ads-all', label: 'Реклама' },
     { value: 'google', label: 'Google' },
     { value: 'youtube', label: 'YouTube' },
     { value: 'netflix', label: 'Netflix' },
@@ -72,7 +72,7 @@ const GEO_SITE_CHOICES = [
     { value: 'microsoft', label: 'Microsoft' }
 ];
 
-const GEO_ACTION_LABELS = { proxy: 'Ñ‡ÐµÑ€ÐµÐ· VPN', direct: 'Ð½Ð°Ð¿Ñ€ÑÐ¼ÑƒÑŽ', block: 'Ð·Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ' };
+const GEO_ACTION_LABELS = { proxy: 'через VPN', direct: 'напрямую', block: 'заблокировать' };
 
 // --- WEBVIEW2 / PHOTINO COMMUNICATION BRIDGE ---
 function sendToHost(action, data = {}) {
@@ -121,7 +121,7 @@ function renderGeoRulesList() {
     if (entries.length === 0) {
         const empty = document.createElement('span');
         empty.className = 'setting-desc';
-        empty.textContent = 'ÐŸÐ¾ÐºÐ° Ð¿Ñ€Ð°Ð²Ð¸Ð» Ð½ÐµÑ‚.';
+        empty.textContent = 'Пока правил нет.';
         list.appendChild(empty);
         return;
     }
@@ -136,16 +136,16 @@ function renderGeoRulesList() {
         const choices = type === 'geoip' ? GEO_IP_CHOICES : GEO_SITE_CHOICES;
         const choice = choices.find(item => item.value === value);
         const title = document.createElement('span');
-        title.textContent = `${choice?.label || matcher} â€” ${GEO_ACTION_LABELS[action] || action || 'Ð´ÐµÐ¹ÑÑ‚Ð²Ð¸Ðµ Ð½Ðµ Ð·Ð°Ð´Ð°Ð½Ð¾'}`;
+        title.textContent = `${choice?.label || matcher} — ${GEO_ACTION_LABELS[action] || action || 'действие не задано'}`;
         const code = document.createElement('code');
         code.textContent = entry.line;
         summary.append(title, code);
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'geo-rule-remove';
-        remove.title = 'Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾';
-        remove.setAttribute('aria-label', 'Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾');
-        remove.textContent = 'Ã—';
+        remove.title = 'Удалить правило';
+        remove.setAttribute('aria-label', 'Удалить правило');
+        remove.textContent = '×';
         remove.addEventListener('click', () => {
             const lines = textarea.value.split(/\r?\n/);
             lines.splice(entry.index, 1);
@@ -171,11 +171,11 @@ function addGeoRoutingRule() {
     const matcher = rule.split('=')[0].toLowerCase();
     const existing = textarea.value.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
     if (existing.some(line => line.split('=')[0].toLowerCase() === matcher)) {
-        showToast('Ð”Ð»Ñ ÑÑ‚Ð¾Ð¹ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¸ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾ ÑƒÐ¶Ðµ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾');
+        showToast('Для этой категории правило уже добавлено');
         return;
     }
     if (existing.filter(line => !line.startsWith('#')).length >= 32) {
-        showToast('ÐœÐ¾Ð¶Ð½Ð¾ Ð´Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð½Ðµ Ð±Ð¾Ð»ÐµÐµ 32 Ð¿Ñ€Ð°Ð²Ð¸Ð»');
+        showToast('Можно добавить не более 32 правил');
         return;
     }
     existing.push(rule);
@@ -530,7 +530,7 @@ function showUpdateDialog(version, url) {
     appState.pendingUpdateVersion = version;
     const dialog = document.getElementById('dialog-update');
     if (dialog) {
-        document.getElementById('update-dialog-text').innerText = `Ð”Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð° Ð½Ð¾Ð²Ð°Ñ Ð²ÐµÑ€ÑÐ¸Ñ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ: v${version}. Ð¥Ð¾Ñ‚Ð¸Ñ‚Ðµ ÑÐºÐ°Ñ‡Ð°Ñ‚ÑŒ ÐµÑ‘?`;
+        document.getElementById('update-dialog-text').innerText = `Доступна новая версия приложения: v${version}. Хотите скачать её?`;
         
         const downloadBtn = document.getElementById('btn-update-download');
         const newDownloadBtn = downloadBtn.cloneNode(true);
@@ -557,51 +557,74 @@ function toggleConnection() {
     }
 }
 
+function setConnectBtnText(text) {
+    const btn = document.getElementById('btn-connect');
+    if (!btn) return;
+    const label = btn.querySelector('.connect-btn-label');
+    if (label) {
+        label.innerText = text;
+    } else {
+        btn.innerText = text;
+    }
+}
+
 function updateVpnState(state) {
     appState.vpnState = state;
     const label = document.getElementById('status-label');
     const btn = document.getElementById('btn-connect');
+    const headline = document.getElementById('zen-status-headline');
+    const subline = document.getElementById('zen-status-subline');
+    const zenDot = document.querySelector('.zen-status-dot');
 
-    label.className = 'status-text ' + state.toLowerCase();
+    if (label) label.className = 'status-text ' + state.toLowerCase();
+    if (zenDot) zenDot.className = 'zen-status-dot ' + state.toLowerCase();
     const sidebarTitle = document.getElementById('sidebar-status-title');
     const sidebarSubtitle = document.getElementById('sidebar-status-subtitle');
     const sidebarDot = document.querySelector('.sidebar-status-dot');
     
     switch (state) {
         case 'DISCONNECTED':
-            label.innerText = 'ÐžÑ‚ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾';
-            btn.innerText = 'ÐŸÐ¾Ð´ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒÑÑ';
-            btn.className = 'connect-btn';
+            if (label) label.innerText = 'Отключено';
+            if (headline) headline.innerText = 'Защита выключена';
+            if (subline) subline.innerText = 'Интернет работает напрямую';
+            setConnectBtnText('Подключиться');
+            if (btn) btn.className = 'connect-btn';
             hideStatsContainerDetails();
-            sidebarTitle.innerText = 'Ð¡Ð¾ÐµÐ´Ð¸Ð½ÐµÐ½Ð¸Ðµ Ð²Ñ‹ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾';
-            sidebarSubtitle.innerText = 'Ð˜Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ Ð½Ð°Ð¿Ñ€ÑÐ¼ÑƒÑŽ';
-            sidebarDot.className = 'sidebar-status-dot';
+            if (sidebarTitle) sidebarTitle.innerText = 'Соединение выключено';
+            if (sidebarSubtitle) sidebarSubtitle.innerText = 'Интернет работает напрямую';
+            if (sidebarDot) sidebarDot.className = 'sidebar-status-dot';
             break;
         case 'CONNECTING':
-            label.innerText = 'ÐŸÐ¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ...';
-            btn.innerText = 'ÐŸÑ€ÐµÑ€Ð²Ð°Ñ‚ÑŒ';
-            btn.className = 'connect-btn';
-            sidebarTitle.innerText = 'ÐŸÐ¾Ð´ÐºÐ»ÑŽÑ‡Ð°ÐµÐ¼ÑÑ';
-            sidebarSubtitle.innerText = 'Ð£ÑÑ‚Ð°Ð½Ð°Ð²Ð»Ð¸Ð²Ð°ÐµÐ¼ ÑÐ¾ÐµÐ´Ð¸Ð½ÐµÐ½Ð¸Ðµ';
-            sidebarDot.className = 'sidebar-status-dot connecting';
+            if (label) label.innerText = 'Подключение...';
+            if (headline) headline.innerText = 'Подключаемся...';
+            if (subline) subline.innerText = 'Устанавливаем защищённый туннель';
+            setConnectBtnText('Прервать');
+            if (btn) btn.className = 'connect-btn connecting';
+            if (sidebarTitle) sidebarTitle.innerText = 'Подключаемся';
+            if (sidebarSubtitle) sidebarSubtitle.innerText = 'Устанавливаем соединение';
+            if (sidebarDot) sidebarDot.className = 'sidebar-status-dot connecting';
             break;
         case 'CONNECTED':
-            label.innerText = 'ÐŸÐ¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾';
-            btn.innerText = 'ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒÑÑ';
-            btn.className = 'connect-btn connected';
+            if (label) label.innerText = 'Подключено';
+            if (headline) headline.innerText = 'Вы защищены';
+            if (subline) subline.innerText = appState.selectedConfig ? getDisplayLabel(appState.selectedConfig) : 'Туннель активен';
+            setConnectBtnText('Отключить');
+            if (btn) btn.className = 'connect-btn connected';
             showStatsContainerDetails();
-            sidebarTitle.innerText = 'Ð¡Ð¾ÐµÐ´Ð¸Ð½ÐµÐ½Ð¸Ðµ Ð²ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾';
-            sidebarSubtitle.innerText = 'Ð¢ÑƒÐ½Ð½ÐµÐ»ÑŒ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚';
-            sidebarDot.className = 'sidebar-status-dot connected';
+            if (sidebarTitle) sidebarTitle.innerText = 'Соединение включено';
+            if (sidebarSubtitle) sidebarSubtitle.innerText = 'Туннель работает';
+            if (sidebarDot) sidebarDot.className = 'sidebar-status-dot connected';
             break;
         case 'ERROR':
-            label.innerText = 'ÐžÑˆÐ¸Ð±ÐºÐ°';
-            btn.innerText = 'ÐŸÐ¾Ð´ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒÑÑ';
-            btn.className = 'connect-btn';
+            if (label) label.innerText = 'Ошибка';
+            if (headline) headline.innerText = 'Не удалось подключиться';
+            if (subline) subline.innerText = 'Попробуйте другой сервер';
+            setConnectBtnText('Подключиться');
+            if (btn) btn.className = 'connect-btn error';
             hideStatsContainerDetails();
-            sidebarTitle.innerText = 'ÐÐµ ÑƒÐ´Ð°Ð»Ð¾ÑÑŒ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ð¸Ñ‚ÑŒÑÑ';
-            sidebarSubtitle.innerText = 'ÐžÑ‚ÐºÑ€Ð¾Ð¹Ñ‚Ðµ Ð´Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÑƒ';
-            sidebarDot.className = 'sidebar-status-dot error';
+            if (sidebarTitle) sidebarTitle.innerText = 'Не удалось подключиться';
+            if (sidebarSubtitle) sidebarSubtitle.innerText = 'Откройте диагностику';
+            if (sidebarDot) sidebarDot.className = 'sidebar-status-dot error';
             break;
     }
 }
@@ -622,10 +645,15 @@ function hideStatsContainerDetails() {
 // --- ACTIVE SERVER DISPLAY ---
 function updateActiveServerDisplay() {
     const label = document.getElementById('active-server-name');
+    const subline = document.getElementById('zen-status-subline');
     if (appState.selectedConfig) {
-        label.innerText = getDisplayLabel(appState.selectedConfig);
+        const text = getDisplayLabel(appState.selectedConfig);
+        if (label) label.innerText = text;
+        if (appState.vpnState === 'CONNECTED' && subline) {
+            subline.innerText = text;
+        }
     } else {
-        label.innerText = 'Ð¡ÐµÑ€Ð²ÐµÑ€ Ð½Ðµ Ð²Ñ‹Ð±Ñ€Ð°Ð½';
+        if (label) label.innerText = 'Сервер не выбран';
     }
     // Re-render server list to highlight active configuration
     renderServersList();
@@ -707,7 +735,7 @@ function renderServersList() {
     list.innerHTML = '';
 
     if (appState.configHistory.length === 0) {
-        list.innerHTML = '<div class="empty-state">Ð¡Ð¿Ð¸ÑÐ¾Ðº ÑÐµÑ€Ð²ÐµÑ€Ð¾Ð² Ð¿ÑƒÑÑ‚</div>';
+        list.innerHTML = '<div class="empty-state">Список серверов пуст</div>';
         return;
     }
 
@@ -715,7 +743,7 @@ function renderServersList() {
     document.getElementById('server-count').innerText = filtered.length;
 
     if (filtered.length === 0) {
-        list.innerHTML = '<div class="empty-state">ÐŸÐ¾ Ð²Ñ‹Ð±Ñ€Ð°Ð½Ð½Ð¾Ð¼Ñƒ Ñ„Ð¸Ð»ÑŒÑ‚Ñ€Ñƒ ÑÐµÑ€Ð²ÐµÑ€Ñ‹ Ð½Ðµ Ð½Ð°Ð¹Ð´ÐµÐ½Ñ‹</div>';
+        list.innerHTML = '<div class="empty-state">По выбранному фильтру серверы не найдены</div>';
         return;
     }
 
@@ -749,7 +777,7 @@ function renderExternalConfigs() {
     list.innerHTML = '';
 
     if (appState.externalConfigs.length === 0) {
-        list.innerHTML = '<div class="empty-state">ÐÐµÑ‚ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ñ‹Ñ… ÑÐµÑ€Ð²ÐµÑ€Ð¾Ð²</div>';
+        list.innerHTML = '<div class="empty-state">Нет доступных серверов</div>';
         return;
     }
 
@@ -759,7 +787,7 @@ function renderExternalConfigs() {
         const isSelected = (link.trim() === appState.selectedConfig.trim());
 
         const stale = item.verifiedAt && Date.now() - Date.parse(item.verifiedAt) >= 15 * 60 * 1000;
-        const card = createServerCard(link, isSelected, stale ? undefined : ping, false, false, stale ? 'ÐŸÑ€Ð¾Ð²ÐµÑ€ÐºÐ° ÑƒÑÑ‚Ð°Ñ€ÐµÐ»Ð°' : item.verificationStatus);
+        const card = createServerCard(link, isSelected, stale ? undefined : ping, false, false, stale ? 'Проверка устарела' : item.verificationStatus);
         list.appendChild(card);
     });
 }
@@ -822,7 +850,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
 
     const metaSpan = document.createElement('span');
     metaSpan.className = 'server-meta';
-    metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' Â· ' + verificationStatus : ' Â· ÐÐµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½');
+    metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' · ' + verificationStatus : ' · Не проверен');
     detailsDiv.appendChild(metaSpan);
     card.appendChild(detailsDiv);
 
@@ -838,11 +866,11 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
         const badge = document.createElement('span');
         if (ping < 0) {
             badge.className = 'ping-badge high';
-            badge.innerText = 'ÐÐµÑ‚ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ñ';
+            badge.innerText = 'Нет подтверждения';
         } else {
             badge.className = 'ping-badge' + (ping > 300 ? ' high' : (ping > 150 ? ' medium' : ''));
             badge.innerText = `HTTPS ${ping} ms`;
-            if (verificationStatus === 'Ð§Ð°ÑÑ‚Ð¸Ñ‡Ð½Ð°Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ÑÑ‚ÑŒ') badge.className = 'ping-badge medium';
+            if (verificationStatus === 'Частичная доступность') badge.className = 'ping-badge medium';
         }
         pingArea.appendChild(badge);
     } else {
@@ -850,7 +878,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
         const pingBtn = document.createElement('span');
         pingBtn.className = 'text-link-btn';
         pingBtn.style.fontSize = '11px';
-        pingBtn.innerText = 'ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ';
+        pingBtn.innerText = 'Проверить';
         pingBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             sendToHost('checkServerPing', { link });
@@ -869,7 +897,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
     // Copy/Share button
     const copyBtn = document.createElement('button');
     copyBtn.className = 'btn-delete-server';
-    copyBtn.title = 'ÐšÐ¾Ð¿Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ ÑÑÑ‹Ð»ÐºÑƒ';
+    copyBtn.title = 'Копировать ссылку';
     copyBtn.innerHTML = `
         <svg viewBox="0 0 24 24" width="16" height="16">
             <path fill="currentColor" d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
@@ -885,7 +913,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
     if (showDelete) {
         const delBtn = document.createElement('button');
         delBtn.className = 'btn-delete-server';
-        delBtn.title = 'Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ ÑÐµÑ€Ð²ÐµÑ€';
+        delBtn.title = 'Удалить сервер';
         delBtn.innerHTML = `
             <svg viewBox="0 0 24 24" width="16" height="16">
                 <path fill="currentColor" d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/>
@@ -893,7 +921,7 @@ function createServerCard(link, isSelected, ping, loading, showDelete = true, ve
         `;
         delBtn.addEventListener('click', (e) => {
             e.stopPropagation();
-            if (confirm("Ð£Ð´Ð°Ð»Ð¸Ñ‚ÑŒ ÑÑ‚Ð¾Ñ‚ ÑÐµÑ€Ð²ÐµÑ€ Ð¸Ð· ÑÐ¿Ð¸ÑÐºÐ°?")) {
+            if (confirm("Удалить этот сервер из списка?")) {
                 sendToHost('deleteConfig', { link });
             }
         });
@@ -915,7 +943,7 @@ function updateServerPingBadge(link, latency, loading) {
     const verificationStatus = appState.verificationStatuses[link] || '';
     const metaSpan = card.querySelector('.server-meta');
     if (metaSpan) {
-        metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' Â· ' + verificationStatus : ' Â· ÐÐµ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐµÐ½');
+        metaSpan.innerText = getProtocolHost(link) + (verificationStatus ? ' · ' + verificationStatus : ' · Не проверен');
     }
     const pingArea = card.querySelector('.server-ping-area');
     if (!pingArea) return;
@@ -928,18 +956,18 @@ function updateServerPingBadge(link, latency, loading) {
         const badge = document.createElement('span');
         if (latency < 0) {
             badge.className = 'ping-badge high';
-            badge.innerText = 'ÐÐµÑ‚ Ð¿Ð¾Ð´Ñ‚Ð²ÐµÑ€Ð¶Ð´ÐµÐ½Ð¸Ñ';
+            badge.innerText = 'Нет подтверждения';
         } else {
             badge.className = 'ping-badge' + (latency > 300 ? ' high' : (latency > 150 ? ' medium' : ''));
             badge.innerText = `HTTPS ${latency} ms`;
-            if (verificationStatus === 'Ð§Ð°ÑÑ‚Ð¸Ñ‡Ð½Ð°Ñ Ð´Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ÑÑ‚ÑŒ') badge.className = 'ping-badge medium';
+            if (verificationStatus === 'Частичная доступность') badge.className = 'ping-badge medium';
         }
         pingArea.appendChild(badge);
     } else {
         const pingBtn = document.createElement('span');
         pingBtn.className = 'text-link-btn';
         pingBtn.style.fontSize = '11px';
-        pingBtn.innerText = 'ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ';
+        pingBtn.innerText = 'Проверить';
         pingBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             sendToHost('checkServerPing', { link });
@@ -977,7 +1005,7 @@ function renderAllLogs() {
     view.innerHTML = '';
 
     if (appState.logs.length === 0) {
-        view.innerHTML = '<div class="log-line empty">Ð›Ð¾Ð³Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚</div>';
+        view.innerHTML = '<div class="log-line empty">Логи отсутствуют</div>';
         return;
     }
 
@@ -1078,7 +1106,7 @@ function formatDuration(sec) {
 }
 
 function getFlagEmoji(countryCode) {
-    if (!countryCode || countryCode.length !== 2) return 'ðŸŒ';
+    if (!countryCode || countryCode.length !== 2) return '🌐';
     const codePoints = countryCode
         .toUpperCase()
         .split('')
@@ -1086,7 +1114,7 @@ function getFlagEmoji(countryCode) {
     try {
         return String.fromCodePoint(...codePoints);
     } catch (e) {
-        return 'ðŸŒ';
+        return '🌐';
     }
 }
 

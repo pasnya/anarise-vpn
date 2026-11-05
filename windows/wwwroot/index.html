@@ -12,33 +12,33 @@
         
         <!-- MAIN DASHBOARD SCREEN -->
         <div id="screen-main" class="screen active">
-            <aside class="variant-sidebar" aria-label="ÐÐ°Ð²Ð¸Ð³Ð°Ñ†Ð¸Ñ">
+            <aside class="variant-sidebar" aria-label="Навигация">
                 <div class="sidebar-brand">
                     <img src="logo.png" alt="" class="sidebar-logo">
                     <div>
                         <div class="sidebar-product">ANARISE</div>
-                        <div class="sidebar-caption">VPN-ÐºÐ»Ð¸ÐµÐ½Ñ‚</div>
+                        <div class="sidebar-caption">VPN-клиент</div>
                     </div>
                 </div>
                 <div class="sidebar-status">
                     <span class="sidebar-status-dot"></span>
                     <div>
-                        <strong id="sidebar-status-title">Ð¡Ð¾ÐµÐ´Ð¸Ð½ÐµÐ½Ð¸Ðµ Ð²Ñ‹ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¾</strong>
-                        <span id="sidebar-status-subtitle">Ð˜Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚ Ñ€Ð°Ð±Ð¾Ñ‚Ð°ÐµÑ‚ Ð½Ð°Ð¿Ñ€ÑÐ¼ÑƒÑŽ</span>
+                        <strong id="sidebar-status-title">Соединение выключено</strong>
+                        <span id="sidebar-status-subtitle">Интернет работает напрямую</span>
                     </div>
                 </div>
                 <nav class="sidebar-nav">
                     <button class="sidebar-nav-item active" type="button" data-nav-view="dashboard">
-                        <span class="nav-glyph">âŒ‚</span><span>Ð“Ð»Ð°Ð²Ð½Ð°Ñ</span>
+                        <span class="nav-glyph">⌂</span><span>Главная</span>
                     </button>
                     <button class="sidebar-nav-item" type="button" data-nav-view="servers" data-nav-tab="tab-servers">
-                        <span class="nav-glyph">â—ˆ</span><span>Ð¡ÐµÑ€Ð²ÐµÑ€Ñ‹</span>
+                        <span class="nav-glyph">◈</span><span>Серверы</span>
                     </button>
                     <button class="sidebar-nav-item" type="button" data-nav-view="diagnostics" data-nav-tab="tab-logs">
-                        <span class="nav-glyph">âŒ</span><span>Ð”Ð¸Ð°Ð³Ð½Ð¾ÑÑ‚Ð¸ÐºÐ°</span>
+                        <span class="nav-glyph">⌁</span><span>Диагностика</span>
                     </button>
                     <button class="sidebar-nav-item" type="button" id="btn-sidebar-settings">
-                        <span class="nav-glyph">âš™</span><span>ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸</span>
+                        <span class="nav-glyph">⚙</span><span>Настройки</span>
                     </button>
                 </nav>
                 <div class="sidebar-footer">ANARISE VPN</div>
@@ -49,7 +49,7 @@
                     <img src="logo.png" alt="Logo" class="logo-img">
                     <h1 class="brand-name">ANARISE</h1>
                 </div>
-                <button id="btn-settings" class="icon-btn" title="ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸">
+                <button id="btn-settings" class="icon-btn" title="Настройки">
                     <svg viewBox="0 0 24 24" width="24" height="24">
                         <path fill="currentColor" d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.13,5.91,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.43-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
                     </svg>
@@ -113,40 +113,40 @@
             <!-- Exit IP Card (Visible only when connected) -->
             <div id="exit-ip-card" class="exit-ip-card hidden">
                 <div class="exit-ip-header">
-                    <span class="flag-icon" id="exit-ip-flag">ðŸŒ</span>
+                    <span class="flag-icon" id="exit-ip-flag">🌐</span>
                     <span class="ip-address" id="exit-ip-addr">127.0.0.1</span>
                 </div>
-                <div class="exit-ip-location" id="exit-ip-loc">Ð—Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ð¸Ð½Ñ„Ð¾Ñ€Ð¼Ð°Ñ†Ð¸Ð¸ Ð¾Ð± IP...</div>
+                <div class="exit-ip-location" id="exit-ip-loc">Загрузка информации об IP...</div>
             </div>
 
             <!-- Stats grid -->
             <div class="stats-grid">
                 <div class="stat-card">
-                    <span class="stat-title">ÐžÑ‚Ð´Ð°Ñ‡Ð°</span>
+                    <span class="stat-title">Отдача</span>
                     <span id="stat-upload-speed" class="stat-value">0 B/s</span>
                     <div id="stat-total-upload-container" class="stat-sub hidden">
-                        <span>Ð’ÑÐµÐ³Ð¾:</span> <span id="stat-total-upload">0 B</span>
+                        <span>Всего:</span> <span id="stat-total-upload">0 B</span>
                     </div>
                 </div>
                 <div class="stat-card">
-                    <span class="stat-title">Ð—Ð°Ð³Ñ€ÑƒÐ·ÐºÐ°</span>
+                    <span class="stat-title">Загрузка</span>
                     <span id="stat-download-speed" class="stat-value">0 B/s</span>
                     <div id="stat-total-download-container" class="stat-sub hidden">
-                        <span>Ð’ÑÐµÐ³Ð¾:</span> <span id="stat-total-download">0 B</span>
+                        <span>Всего:</span> <span id="stat-total-download">0 B</span>
                     </div>
                 </div>
             </div>
 
             <div id="connection-duration-card" class="stat-card duration-card hidden">
-                <span class="stat-title">Ð’Ñ€ÐµÐ¼Ñ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ</span>
+                <span class="stat-title">Время подключения</span>
                 <span id="stat-duration" class="stat-value">00:00:00</span>
             </div>
 
             <!-- Tabs Navigation -->
             <div class="tab-row">
-                <button class="tab-btn active" data-tab="tab-servers">Ð¡ÐµÑ€Ð²ÐµÑ€Ñ‹</button>
-                <button class="tab-btn" data-tab="tab-external">Ð’Ð½ÐµÑˆÐ½Ð¸Ðµ</button>
-                <button class="tab-btn" data-tab="tab-logs">Ð›Ð¾Ð³Ð¸</button>
+                <button class="tab-btn active" data-tab="tab-servers">Серверы</button>
+                <button class="tab-btn" data-tab="tab-external">Внешние</button>
+                <button class="tab-btn" data-tab="tab-logs">Логи</button>
             </div>
 
             <!-- Tab Contents -->
@@ -155,20 +155,20 @@
                 <div id="tab-servers" class="tab-pane active">
                     <div class="explorer-toolbar">
                         <div class="server-search">
-                            <span>âŒ•</span>
-                            <input id="server-search-input" type="search" placeholder="ÐŸÐ¾Ð¸ÑÐº Ð¿Ð¾ Ð³Ð¾Ñ€Ð¾Ð´Ð°Ð¼ Ð¸ ÑÑ‚Ñ€Ð°Ð½Ð°Ð¼..." autocomplete="off">
+                            <span>⌕</span>
+                            <input id="server-search-input" type="search" placeholder="Поиск по городам и странам..." autocomplete="off">
                         </div>
-                        <div class="region-filters" role="group" aria-label="Ð¤Ð¸Ð»ÑŒÑ‚Ñ€ Ñ€ÐµÐ³Ð¸Ð¾Ð½Ð°">
-                            <button class="region-filter active" type="button" data-region="all">Ð’ÑÐµ</button>
-                            <button class="region-filter" type="button" data-region="europe">Ð•Ð²Ñ€Ð¾Ð¿Ð°</button>
-                            <button class="region-filter" type="button" data-region="asia">ÐÐ·Ð¸Ñ</button>
-                            <button class="region-filter" type="button" data-region="america">ÐÐ¼ÐµÑ€Ð¸ÐºÐ°</button>
+                        <div class="region-filters" role="group" aria-label="Фильтр региона">
+                            <button class="region-filter active" type="button" data-region="all">Все</button>
+                            <button class="region-filter" type="button" data-region="europe">Европа</button>
+                            <button class="region-filter" type="button" data-region="asia">Азия</button>
+                            <button class="region-filter" type="button" data-region="america">Америка</button>
                         </div>
                     </div>
                     <div class="tab-header">
-                        <h3>Ð’Ð°ÑˆÐ¸ ÑÐµÑ€Ð²ÐµÑ€Ñ‹</h3>
+                        <h3>Ваши серверы</h3>
                         <div class="header-actions">
-                            <button id="btn-refresh-pings" class="icon-btn-small" title="ÐŸÑ€Ð¾Ð²ÐµÑ€Ð¸Ñ‚ÑŒ Ð²ÑÐµ Ð¿Ð¸Ð½Ð³Ð¸">
+                            <button id="btn-refresh-pings" class="icon-btn-small" title="Проверить все пинги">
                                 <svg viewBox="0 0 24 24" width="18" height="18">
                                     <path fill="currentColor" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08 c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/>
                                 </svg>
@@ -177,24 +177,24 @@
                     </div>
                     <div id="servers-list" class="servers-list">
                         <!-- Server cards added here dynamically -->
-                        <div class="empty-state">Ð¡Ð¿Ð¸ÑÐ¾Ðº ÑÐµÑ€Ð²ÐµÑ€Ð¾Ð² Ð¿ÑƒÑÑ‚</div>
+                        <div class="empty-state">Список серверов пуст</div>
                     </div>
                 </div>
 
                 <!-- External Lists Tab -->
                 <div id="tab-external" class="tab-pane">
                     <div class="tab-header">
-                        <h3>Ð’Ð½ÐµÑˆÐ½Ð¸Ðµ ÑÐ¿Ð¸ÑÐºÐ¸</h3>
+                        <h3>Внешние списки</h3>
                         <div class="header-actions" style="display: flex; gap: 6px; align-items: center;">
-                            <button id="btn-cancel-external" class="text-link-btn hidden" title="ÐžÑÑ‚Ð°Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð¾Ð²ÐµÑ€ÐºÑƒ" style="color: #ff6b6b;">Ð¡Ñ‚Ð¾Ð¿</button>
-                            <button id="btn-refresh-external" class="icon-btn-small" title="ÐžÐ±Ð½Ð¾Ð²Ð¸Ñ‚ÑŒ ÑÐ¿Ð¸ÑÐºÐ¸">
+                            <button id="btn-cancel-external" class="text-link-btn hidden" title="Остановить проверку" style="color: #ff6b6b;">Стоп</button>
+                            <button id="btn-refresh-external" class="icon-btn-small" title="Обновить списки">
                                 <svg viewBox="0 0 24 24" width="18" height="18">
                                     <path fill="currentColor" d="M17.65,6.35C16.2,4.9,14.21,4,12,4c-4.42,0-7.99,3.58-7.99,8s3.57,8,7.99,8c3.73,0,6.84-2.55,7.73-6h-2.08 c-0.82,2.33-3.04,4-5.65,4c-3.31,0-6-2.69-6-6s2.69-6,6-6c1.66,0,3.14,0.69,4.22,1.78L13,11h7V4L17.65,6.35z"/>
                                 </svg>
                             </button>
                         </div>
                     </div>
-                    <div id="external-status" class="status-info">Ð—Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° Ð²Ð½ÐµÑˆÐ½Ð¸Ñ… ÑÐµÑ€Ð²ÐµÑ€Ð¾Ð²...</div>
+                    <div id="external-status" class="status-info">Загрузка внешних серверов...</div>
                     <div id="external-list" class="servers-list">
                         <!-- External Server cards added here dynamically -->
                     </div>
@@ -203,13 +203,13 @@
                 <!-- Logs Tab -->
                 <div id="tab-logs" class="tab-pane">
                     <div class="tab-header">
-                        <h3>Ð›Ð¾Ð³Ð¸ ÑÐ¾ÐµÐ´Ð¸Ð½ÐµÐ½Ð¸Ñ</h3>
+                        <h3>Логи соединения</h3>
                         <div class="header-actions">
-                            <button id="btn-copy-logs" class="text-link-btn">ÐšÐ¾Ð¿Ð¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ</button>
+                            <button id="btn-copy-logs" class="text-link-btn">Копировать</button>
                         </div>
                     </div>
                     <div id="logs-view" class="logs-view">
-                        <div class="log-line empty">Ð›Ð¾Ð³Ð¸ Ð¾Ñ‚ÑÑƒÑ‚ÑÑ‚Ð²ÑƒÑŽÑ‚</div>
+                        <div class="log-line empty">Логи отсутствуют</div>
                     </div>
                 </div>
             </div>
@@ -218,22 +218,22 @@
         <!-- SETTINGS SCREEN -->
         <div id="screen-settings" class="screen">
             <header class="header">
-                <button id="btn-settings-back" class="icon-btn" title="ÐÐ°Ð·Ð°Ð´">
+                <button id="btn-settings-back" class="icon-btn" title="Назад">
                     <svg viewBox="0 0 24 24" width="24" height="24">
                         <path fill="currentColor" d="M20,11H7.83l5.59-5.59L12,4l-8,8l8,8l1.41-1.41L7.83,13H20V11z"/>
                     </svg>
                 </button>
-                <h1 class="brand-name">ÐÐ°ÑÑ‚Ñ€Ð¾Ð¹ÐºÐ¸</h1>
+                <h1 class="brand-name">Настройки</h1>
                 <div style="width: 40px;"></div> <!-- Spacer -->
             </header>
 
             <div class="settings-list">
-                <div class="settings-section-title">Ð ÐµÐ¶Ð¸Ð¼ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ñ</div>
+                <div class="settings-section-title">Режим подключения</div>
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">VPN-Ñ‚ÑƒÐ½Ð½ÐµÐ»ÑŒ (TUN)</span>
-                        <span class="setting-desc">ÐÐ°Ð¿Ñ€Ð°Ð²Ð»ÑÑ‚ÑŒ Ð²ÐµÑÑŒ ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ð¹ Ñ‚Ñ€Ð°Ñ„Ð¸Ðº Ñ‡ÐµÑ€ÐµÐ· VPN. Ð¢Ñ€ÐµÐ±ÑƒÑŽÑ‚ÑÑ Ð¿Ñ€Ð°Ð²Ð° Ð°Ð´Ð¼Ð¸Ð½Ð¸ÑÑ‚Ñ€Ð°Ñ‚Ð¾Ñ€Ð°</span>
+                        <span class="setting-title">VPN-туннель (TUN)</span>
+                        <span class="setting-desc">Направлять весь системный трафик через VPN. Требуются права администратора</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-vpn-mode">
@@ -243,8 +243,8 @@
 
                 <div class="setting-card" id="card-system-proxy">
                     <div class="setting-info">
-                        <span class="setting-title">Ð¡Ð¸ÑÑ‚ÐµÐ¼Ð½Ñ‹Ð¹ Ð¿Ñ€Ð¾ÐºÑÐ¸</span>
-                        <span class="setting-desc">ÐÐ²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸ Ð½Ð°ÑÑ‚Ñ€Ð°Ð¸Ð²Ð°Ñ‚ÑŒ Ð¿Ñ€Ð¾ÐºÑÐ¸ Ð² Windows Ð¿Ñ€Ð¸ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ð¸</span>
+                        <span class="setting-title">Системный прокси</span>
+                        <span class="setting-desc">Автоматически настраивать прокси в Windows при подключении</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-system-proxy" checked>
@@ -252,28 +252,28 @@
                     </div>
                 </div>
 
-                <div class="settings-section-title">ÐŸÐ¾Ñ€Ñ‚Ñ‹ Ð¿Ñ€Ð¾ÐºÑÐ¸</div>
+                <div class="settings-section-title">Порты прокси</div>
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">SOCKS5 Ð¿Ð¾Ñ€Ñ‚</span>
-                        <span class="setting-desc">Ð›Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¿Ð¾Ñ€Ñ‚ SOCKS5 Ð¿Ñ€Ð¾ÐºÑÐ¸</span>
+                        <span class="setting-title">SOCKS5 порт</span>
+                        <span class="setting-desc">Локальный порт SOCKS5 прокси</span>
                     </div>
                     <input type="number" id="input-socks-port" class="setting-input" value="20808" min="1" max="65535">
                 </div>
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">HTTP Ð¿Ð¾Ñ€Ñ‚</span>
-                        <span class="setting-desc">Ð›Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ð¹ Ð¿Ð¾Ñ€Ñ‚ HTTP Ð¿Ñ€Ð¾ÐºÑÐ¸</span>
+                        <span class="setting-title">HTTP порт</span>
+                        <span class="setting-desc">Локальный порт HTTP прокси</span>
                     </div>
                     <input type="number" id="input-http-port" class="setting-input" value="20809" min="1" max="65535">
                 </div>
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">Ð—Ð°Ñ‰Ð¸Ñ‚Ð° Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ð¾Ð³Ð¾ Ð¿Ñ€Ð¾ÐºÑÐ¸</span>
-                        <span class="setting-desc">Ð¢Ñ€ÐµÐ±Ð¾Ð²Ð°Ñ‚ÑŒ Ð»Ð¾Ð³Ð¸Ð½ Ð¸ Ð¿Ð°Ñ€Ð¾Ð»ÑŒ Ð´Ð»Ñ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… Ð¿Ð¾Ñ€Ñ‚Ð¾Ð². Ð”Ð»Ñ ÑÐ¸ÑÑ‚ÐµÐ¼Ð½Ð¾Ð³Ð¾ Ð¿Ñ€Ð¾ÐºÑÐ¸ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ Ð¼Ð¾Ð³ÑƒÑ‚ Ð·Ð°Ð¿Ñ€Ð¾ÑÐ¸Ñ‚ÑŒ ÑÑ‚Ð¸ Ð´Ð°Ð½Ð½Ñ‹Ðµ</span>
+                        <span class="setting-title">Защита локального прокси</span>
+                        <span class="setting-desc">Требовать логин и пароль для локальных портов. Для системного прокси приложения могут запросить эти данные</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-proxy-auth" checked>
@@ -281,57 +281,57 @@
                     </div>
                 </div>
                 <div class="setting-card">
-                    <div class="setting-info"><span class="setting-title">Ð›Ð¾Ð³Ð¸Ð½ Ð¿Ñ€Ð¾ÐºÑÐ¸</span></div>
+                    <div class="setting-info"><span class="setting-title">Логин прокси</span></div>
                     <input type="text" id="input-proxy-user" class="setting-input credential-input" readonly>
                 </div>
                 <div class="setting-card">
-                    <div class="setting-info"><span class="setting-title">ÐŸÐ°Ñ€Ð¾Ð»ÑŒ Ð¿Ñ€Ð¾ÐºÑÐ¸</span></div>
+                    <div class="setting-info"><span class="setting-title">Пароль прокси</span></div>
                     <input type="text" id="input-proxy-password" class="setting-input credential-input" readonly>
                 </div>
 
-                <div class="settings-section-title">Ð“ÐµÐ¾Ð¼Ð°Ñ€ÑˆÑ€ÑƒÑ‚Ð¸Ð·Ð°Ñ†Ð¸Ñ</div>
+                <div class="settings-section-title">Геомаршрутизация</div>
                 <div class="setting-card geo-routing-card">
                     <div class="setting-info">
-                        <span class="setting-title">ÐšÑƒÐ´Ð° Ð½Ð°Ð¿Ñ€Ð°Ð²Ð»ÑÑ‚ÑŒ ÑÐ°Ð¹Ñ‚Ñ‹ Ð¸ ÑÑ‚Ñ€Ð°Ð½Ñ‹</span>
-                        <span class="setting-desc">Ð”Ð¾Ð±Ð°Ð²ÑŒÑ‚Ðµ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾: Ð²Ñ‹Ð±ÐµÑ€Ð¸Ñ‚Ðµ Ñ‚Ð¸Ð¿, ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸ÑŽ Ð¸ Ð¼Ð°Ñ€ÑˆÑ€ÑƒÑ‚. Ð‘ÐµÐ· Ð¿Ñ€Ð°Ð²Ð¸Ð» Ð²ÐµÑÑŒ Ñ‚Ñ€Ð°Ñ„Ð¸Ðº Ð¸Ð´Ñ‘Ñ‚ Ñ‡ÐµÑ€ÐµÐ· VPN.</span>
+                        <span class="setting-title">Куда направлять сайты и страны</span>
+                        <span class="setting-desc">Добавьте правило: выберите тип, категорию и маршрут. Без правил весь трафик идёт через VPN.</span>
                     </div>
                     <div class="geo-rule-builder">
                         <div class="geo-rule-fields">
-                            <label>Ð¢Ð¸Ð¿
+                            <label>Тип
                                 <select id="geo-rule-type" class="geo-routing-select">
-                                    <option value="geosite">Ð¡Ð°Ð¹Ñ‚ Ð¸Ð»Ð¸ ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ñ</option>
-                                    <option value="geoip">Ð¡Ñ‚Ñ€Ð°Ð½Ð° Ð¿Ð¾ IP</option>
+                                    <option value="geosite">Сайт или категория</option>
+                                    <option value="geoip">Страна по IP</option>
                                 </select>
                             </label>
-                            <label>Ð§Ñ‚Ð¾ Ð½Ð°Ð¹Ñ‚Ð¸
+                            <label>Что найти
                                 <select id="geo-rule-value" class="geo-routing-select"></select>
                             </label>
-                            <label>ÐœÐ°Ñ€ÑˆÑ€ÑƒÑ‚
+                            <label>Маршрут
                                 <select id="geo-rule-action" class="geo-routing-select">
-                                    <option value="direct">ÐÐ°Ð¿Ñ€ÑÐ¼ÑƒÑŽ</option>
-                                    <option value="proxy">Ð§ÐµÑ€ÐµÐ· VPN</option>
-                                    <option value="block">Ð—Ð°Ð±Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²Ð°Ñ‚ÑŒ</option>
+                                    <option value="direct">Напрямую</option>
+                                    <option value="proxy">Через VPN</option>
+                                    <option value="block">Заблокировать</option>
                                 </select>
                             </label>
                         </div>
-                        <div class="geo-rule-preview">Ð‘ÑƒÐ´ÐµÑ‚ Ð´Ð¾Ð±Ð°Ð²Ð»ÐµÐ½Ð¾: <code id="geo-rule-preview"></code></div>
-                        <button type="button" id="btn-add-geo-rule" class="geo-add-rule">Ð”Ð¾Ð±Ð°Ð²Ð¸Ñ‚ÑŒ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾</button>
+                        <div class="geo-rule-preview">Будет добавлено: <code id="geo-rule-preview"></code></div>
+                        <button type="button" id="btn-add-geo-rule" class="geo-add-rule">Добавить правило</button>
                         <div id="geo-rules-list" class="geo-rules-list"></div>
                         <details class="geo-advanced-rules">
-                            <summary>Ð”Ð¾Ð¿Ð¾Ð»Ð½Ð¸Ñ‚ÐµÐ»ÑŒÐ½Ð¾: Ð²Ð²ÐµÑÑ‚Ð¸ Ð¿Ñ€Ð°Ð²Ð¸Ð»Ð¾ Ð²Ñ€ÑƒÑ‡Ð½ÑƒÑŽ</summary>
-                            <span class="setting-desc">Ð¤Ð¾Ñ€Ð¼Ð°Ñ‚: geosite:category-ru=direct. Ð”ÐµÐ¹ÑÑ‚Ð²Ð¸Ñ: proxy, direct, block.</span>
+                            <summary>Дополнительно: ввести правило вручную</summary>
+                            <span class="setting-desc">Формат: geosite:category-ru=direct. Действия: proxy, direct, block.</span>
                             <textarea id="input-geo-routing-rules" class="setting-input geo-routing-input" spellcheck="false" placeholder="geosite:category-ru=direct&#10;geoip:us=proxy"></textarea>
                         </details>
-                        <span class="setting-desc">Ð˜Ð·Ð¼ÐµÐ½ÐµÐ½Ð¸Ñ Ð¿Ñ€Ð¸Ð¼ÐµÐ½ÑÑŽÑ‚ÑÑ Ð¿Ñ€Ð¸ ÑÐ»ÐµÐ´ÑƒÑŽÑ‰ÐµÐ¼ Ð¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ð¸. GeoSite-ÐºÐ°Ñ‚ÐµÐ³Ð¾Ñ€Ð¸Ð¸ Ð·Ð°Ð²Ð¸ÑÑÑ‚ Ð¾Ñ‚ ÑÐ¿Ð¸ÑÐºÐ° Ð´Ð¾Ð¼ÐµÐ½Ð¾Ð² Ð² geosite.dat.</span>
+                        <span class="setting-desc">Изменения применяются при следующем подключении. GeoSite-категории зависят от списка доменов в geosite.dat.</span>
                     </div>
                 </div>
 
-                <div class="settings-section-title">ÐžÑÐ½Ð¾Ð²Ð½Ñ‹Ðµ</div>
+                <div class="settings-section-title">Основные</div>
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">Ð‘Ð»Ð¾ÐºÐ¸Ñ€Ð¾Ð²ÐºÐ° Ð±ÐµÐ· VPN</span>
-                        <span class="setting-desc">ÐžÑ‚ÐºÐ»ÑŽÑ‡Ð°Ñ‚ÑŒ Ð¸Ð½Ñ‚ÐµÑ€Ð½ÐµÑ‚, ÐµÑÐ»Ð¸ VPN Ð½ÐµÐ¾Ð¶Ð¸Ð´Ð°Ð½Ð½Ð¾ Ð¿Ñ€ÐµÑ€Ð²Ñ‘Ñ‚ÑÑ</span>
+                        <span class="setting-title">Блокировка без VPN</span>
+                        <span class="setting-desc">Отключать интернет, если VPN неожиданно прервётся</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-kill-switch">
@@ -341,8 +341,8 @@
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">ÐÐ²Ñ‚Ð¾ÑÑ‚Ð°Ñ€Ñ‚ Ð¿Ñ€Ð¸ Ð·Ð°Ð³Ñ€ÑƒÐ·ÐºÐµ</span>
-                        <span class="setting-desc">Ð—Ð°Ð¿ÑƒÑÐºÐ°Ñ‚ÑŒ ANARISE Ð°Ð²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸ Ð¿Ñ€Ð¸ Ð·Ð°Ð¿ÑƒÑÐºÐµ Windows</span>
+                        <span class="setting-title">Автостарт при загрузке</span>
+                        <span class="setting-desc">Запускать ANARISE автоматически при запуске Windows</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-autostart">
@@ -352,8 +352,8 @@
 
                 <div class="setting-card">
                     <div class="setting-info">
-                        <span class="setting-title">ÐÐ²Ñ‚Ð¾-Ð¿ÐµÑ€ÐµÐ¿Ð¾Ð´ÐºÐ»ÑŽÑ‡ÐµÐ½Ð¸Ðµ</span>
-                        <span class="setting-desc">ÐÐ²Ñ‚Ð¾Ð¼Ð°Ñ‚Ð¸Ñ‡ÐµÑÐºÐ¸ Ð¿ÐµÑ€ÐµÐ¿Ð¾Ð´ÐºÐ»ÑŽÑ‡Ð°Ñ‚ÑŒÑÑ Ð¿Ñ€Ð¸ Ð¾Ð±Ñ€Ñ‹Ð²Ðµ ÑÐ²ÑÐ·Ð¸</span>
+                        <span class="setting-title">Авто-переподключение</span>
+                        <span class="setting-desc">Автоматически переподключаться при обрыве связи</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-autoreconnect" checked>
@@ -363,8 +363,8 @@
 
                 <div class="setting-card-clickable" id="btn-split-tunnel">
                     <div class="setting-info">
-                        <span class="setting-title">ÐžÐ±Ñ…Ð¾Ð´ Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ð¾Ð¹ ÑÐµÑ‚Ð¸ (Bypass LAN)</span>
-                        <span class="setting-desc">ÐŸÑƒÑÐºÐ°Ñ‚ÑŒ Ñ‚Ñ€Ð°Ñ„Ð¸Ðº Ð»Ð¾ÐºÐ°Ð»ÑŒÐ½Ñ‹Ñ… ÑÐµÑ‚ÐµÐ¹ Ð½Ð°Ð¿Ñ€ÑÐ¼ÑƒÑŽ, Ð¼Ð¸Ð½ÑƒÑ Ð¿Ñ€Ð¾ÐºÑÐ¸</span>
+                        <span class="setting-title">Обход локальной сети (Bypass LAN)</span>
+                        <span class="setting-desc">Пускать трафик локальных сетей напрямую, минуя прокси</span>
                     </div>
                     <div class="toggle-switch">
                         <input type="checkbox" id="chk-bypass-lan" checked>
@@ -379,9 +379,9 @@
             <div class="overlay-card">
                 <div class="logo-area-overlay">
                     <img src="logo.png" alt="Logo" class="logo-img-large">
-                    <h2>Ð£ÑÑ‚Ð°Ð½Ð¾Ð²ÐºÐ° Ð¼Ð¾Ð´ÑƒÐ»ÐµÐ¹</h2>
+                    <h2>Установка модулей</h2>
                 </div>
-                <p id="download-status-text">Ð—Ð°Ð³Ñ€ÑƒÐ·ÐºÐ° ÑÐ´ÐµÑ€ Xray Ð¸ Hysteria2...</p>
+                <p id="download-status-text">Загрузка ядер Xray и Hysteria2...</p>
                 <div class="progress-bar-container">
                     <div id="download-progress-fill" class="progress-bar-fill" style="width: 0%;"></div>
                 </div>
@@ -393,12 +393,12 @@
         <!-- Import Subscription Dialog -->
         <div id="dialog-import" class="dialog-overlay hidden">
             <div class="dialog-card">
-                <h3>Ð˜Ð¼Ð¿Ð¾Ñ€Ñ‚ Ð¿Ð¾Ð´Ð¿Ð¸ÑÐºÐ¸</h3>
-                <p class="dialog-desc">Ð’Ð²ÐµÐ´Ð¸Ñ‚Ðµ URL Ð¿Ð¾Ð´Ð¿Ð¸ÑÐºÐ¸ Ñ ÐºÐ¾Ð½Ñ„Ð¸Ð³ÑƒÑ€Ð°Ñ†Ð¸ÑÐ¼Ð¸ (VLESS / VMess / Naive / Hysteria2):</p>
+                <h3>Импорт подписки</h3>
+                <p class="dialog-desc">Введите URL подписки с конфигурациями (VLESS / VMess / Naive / Hysteria2):</p>
                 <input type="text" id="input-sub-url" class="dialog-input" placeholder="https://example.com/sub.txt">
                 <div class="dialog-actions">
-                    <button id="btn-dialog-cancel" class="dialog-btn text-btn">ÐžÑ‚Ð¼ÐµÐ½Ð°</button>
-                    <button id="btn-dialog-import" class="dialog-btn fill-btn" disabled>Ð˜Ð¼Ð¿Ð¾Ñ€Ñ‚</button>
+                    <button id="btn-dialog-cancel" class="dialog-btn text-btn">Отмена</button>
+                    <button id="btn-dialog-import" class="dialog-btn fill-btn" disabled>Импорт</button>
                 </div>
             </div>
         </div>
@@ -406,11 +406,11 @@
         <!-- Update Available Dialog -->
         <div id="dialog-update" class="dialog-overlay hidden">
             <div class="dialog-card">
-                <h3>Ð”Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð¾ Ð¾Ð±Ð½Ð¾Ð²Ð»ÐµÐ½Ð¸Ðµ</h3>
-                <p class="dialog-desc" id="update-dialog-text">Ð”Ð¾ÑÑ‚ÑƒÐ¿Ð½Ð° Ð½Ð¾Ð²Ð°Ñ Ð²ÐµÑ€ÑÐ¸Ñ Ð¿Ñ€Ð¸Ð»Ð¾Ð¶ÐµÐ½Ð¸Ñ. Ð¥Ð¾Ñ‚Ð¸Ñ‚Ðµ ÑÐºÐ°Ñ‡Ð°Ñ‚ÑŒ ÐµÑ‘?</p>
+                <h3>Доступно обновление</h3>
+                <p class="dialog-desc" id="update-dialog-text">Доступна новая версия приложения. Хотите скачать её?</p>
                 <div class="dialog-actions">
-                    <button id="btn-update-cancel" class="dialog-btn text-btn">ÐžÑ‚Ð¼ÐµÐ½Ð°</button>
-                    <button id="btn-update-download" class="dialog-btn fill-btn">Ð¡ÐºÐ°Ñ‡Ð°Ñ‚ÑŒ</button>
+                    <button id="btn-update-cancel" class="dialog-btn text-btn">Отмена</button>
+                    <button id="btn-update-download" class="dialog-btn fill-btn">Скачать</button>
                 </div>
             </div>
         </div>
