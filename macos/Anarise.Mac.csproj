@@ -27,6 +27,7 @@
     <Compile Include="..\windows\DesktopCoreServices.cs" Link="DesktopCoreServices.cs" />
     <Compile Include="..\windows\SecureStorage.cs" Link="SecureStorage.cs" />
     <Compile Include="..\windows\LocalProxyCredentials.cs" Link="LocalProxyCredentials.cs" />
+    <Compile Include="..\windows\MacKeychainStore.cs" Link="MacKeychainStore.cs" />
   </ItemGroup>
 
   <ItemGroup>

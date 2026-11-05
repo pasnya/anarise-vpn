@@ -115,6 +115,47 @@ if (args.Contains("--service-tests", StringComparer.OrdinalIgnoreCase))
         hy2Doc.RootElement.GetProperty("obfs").GetProperty("salamander").GetProperty("password").GetString() != "secret")
         return Fail("DesktopCoreServices.BuildRuntimeCoreConfig failed for Hysteria2.");
 
+    const string localProxyUser = "proxy-user";
+    const string localProxyPassword = "proxy-password";
+    string generatedProxyUsername = LocalProxyCredentials.Create(10);
+    string generatedProxyPassword = LocalProxyCredentials.Create();
+    if (generatedProxyUsername.Length != 10 || generatedProxyPassword.Length != 18 ||
+        generatedProxyUsername.Any(character => !char.IsLetterOrDigit(character)) ||
+        generatedProxyPassword.Any(character => !char.IsLetterOrDigit(character)))
+        return Fail("Generated local proxy credentials must have the expected lengths and safe characters.");
+
+    string authenticatedXray = DesktopCoreServices.BuildRuntimeCoreConfig(
+        LinkParser.Parse("vless://00000000-0000-4000-8000-000000000001@example.com:443?type=tcp&security=tls", 20808, 20809),
+        20808, 20809, isMieru: false, isHysteria: false, proxyUsername: localProxyUser, proxyPassword: localProxyPassword);
+    using var authenticatedXrayDoc = JsonDocument.Parse(authenticatedXray);
+    var xrayInbounds = authenticatedXrayDoc.RootElement.GetProperty("inbounds").EnumerateArray().ToArray();
+    var socksSettings = xrayInbounds.Single(inbound => inbound.GetProperty("protocol").GetString() == "socks").GetProperty("settings");
+    var httpSettings = xrayInbounds.Single(inbound => inbound.GetProperty("protocol").GetString() == "http").GetProperty("settings");
+    if (socksSettings.GetProperty("auth").GetString() != "password" ||
+        socksSettings.GetProperty("accounts")[0].GetProperty("user").GetString() != localProxyUser ||
+        socksSettings.GetProperty("accounts")[0].GetProperty("pass").GetString() != localProxyPassword ||
+        httpSettings.GetProperty("users")[0].GetProperty("user").GetString() != localProxyUser ||
+        httpSettings.GetProperty("users")[0].GetProperty("pass").GetString() != localProxyPassword)
+        return Fail("Xray local SOCKS5 and HTTP inbounds must require the saved proxy credentials.");
+
+    string authenticatedHy2 = DesktopCoreServices.BuildRuntimeCoreConfig(
+        parsedHysteria, 20808, 20809, isMieru: false, isHysteria: true, proxyUsername: localProxyUser, proxyPassword: localProxyPassword);
+    using var authenticatedHy2Doc = JsonDocument.Parse(authenticatedHy2);
+    if (authenticatedHy2Doc.RootElement.GetProperty("socks5").GetProperty("username").GetString() != localProxyUser ||
+        authenticatedHy2Doc.RootElement.GetProperty("socks5").GetProperty("password").GetString() != localProxyPassword ||
+        authenticatedHy2Doc.RootElement.GetProperty("http").GetProperty("username").GetString() != localProxyUser ||
+        authenticatedHy2Doc.RootElement.GetProperty("http").GetProperty("password").GetString() != localProxyPassword)
+        return Fail("Hysteria2 local SOCKS5 and HTTP inbounds must require the saved proxy credentials.");
+
+    string authenticatedMieru = DesktopCoreServices.BuildRuntimeCoreConfig(
+        LinkParser.Parse("mieru://user:password@example.com:443?transport=UDP"),
+        20808, 20809, isMieru: true, isHysteria: false, proxyUsername: localProxyUser, proxyPassword: localProxyPassword);
+    using var authenticatedMieruDoc = JsonDocument.Parse(authenticatedMieru);
+    if (authenticatedMieruDoc.RootElement.GetProperty("socks5Authentication")[0].GetProperty("user").GetString() != localProxyUser ||
+        authenticatedMieruDoc.RootElement.GetProperty("socks5Authentication")[0].GetProperty("password").GetString() != localProxyPassword ||
+        authenticatedMieruDoc.RootElement.TryGetProperty("httpProxyPort", out _))
+        return Fail("Mieru SOCKS5 authentication must be configured without an unsupported HTTP proxy.");
+
     using var vlessDnsDoc = JsonDocument.Parse(LinkParser.Parse("vless://00000000-0000-4000-8000-000000000001@example.com:443?type=tcp&security=tls"));
     if (vlessDnsDoc.RootElement.GetProperty("dns").GetProperty("servers")[0].GetString() != "tcp://1.1.1.1")
         return Fail("LinkParser VLESS config must include tcp://1.1.1.1 DNS server.");

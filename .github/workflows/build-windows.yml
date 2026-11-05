@@ -20,6 +20,21 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.tag || github.ref }}
+
+    - name: Validate release tag and Windows version
+      shell: pwsh
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+      run: |
+        $tag = $env:RELEASE_TAG
+        if ([string]::IsNullOrWhiteSpace($tag)) { $tag = $env:GITHUB_REF_NAME }
+        if ($tag -notmatch '^v\d+\.\d+\.\d+$') { throw "Invalid release tag '$tag'." }
+        $expected = $tag.Substring(1)
+        $source = Get-Content windows/MainWindow.xaml.cs -Raw
+        if ($source -notmatch 'AppVersion\s*=\s*"([^"]+)"') { throw "Windows AppVersion was not found." }
+        if ($Matches[1] -ne $expected) { throw "Release tag $tag does not match Windows AppVersion $($Matches[1])." }
 
     - name: Setup .NET
       uses: actions/setup-dotnet@v4

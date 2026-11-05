@@ -20,6 +20,25 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.tag || github.ref }}
+
+    - name: Validate release tag and Android version
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+      run: |
+        tag="$RELEASE_TAG"
+        if [ -z "$tag" ]; then tag="$GITHUB_REF_NAME"; fi
+        if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "::error::Invalid release tag: $tag"
+          exit 1
+        fi
+        expected="${tag#v}"
+        actual=$(sed -nE 's/.*versionName = "([^"]+)".*/\1/p' android/app/build.gradle.kts | head -n 1)
+        if [ "$actual" != "$expected" ]; then
+          echo "::error::Release tag $tag does not match Android versionName $actual."
+          exit 1
+        fi
 
     - name: Setup Java
       uses: actions/setup-java@v4
@@ -63,7 +82,8 @@ jobs:
           ./gradlew assembleDebug
         fi
 
-    - name: Upload to Release
+    - name: Upload signed APK to Release
+      if: env.HAS_SIGNING_SECRETS == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_TAG: ${{ inputs.tag }}
@@ -76,11 +96,27 @@ jobs:
           echo "::error::Release '$tag' does not exist."
           exit 1
         fi
-        if [ "$HAS_SIGNING_SECRETS" = "true" ]; then
-          asset="AnariseVPN-Android-arm64-${tag}.apk"
-          cp android/app/build/outputs/apk/release/app-release.apk "$asset"
-        else
-          asset="AnariseVPN-Android-debug-${tag}.apk"
-          cp android/app/build/outputs/apk/debug/app-debug.apk "$asset"
-        fi
+        asset="AnariseVPN-Android-arm64-${tag}.apk"
+        cp android/app/build/outputs/apk/release/app-release.apk "$asset"
         gh release upload "$tag" "$asset" --clobber
+
+    - name: Prepare unsigned debug APK artifact
+      if: env.HAS_SIGNING_SECRETS != 'true'
+      env:
+        RELEASE_TAG: ${{ inputs.tag }}
+      run: |
+        tag="$RELEASE_TAG"
+        if [ -z "$tag" ]; then tag="$GITHUB_REF_NAME"; fi
+        cp android/app/build/outputs/apk/debug/app-debug.apk "AnariseVPN-Android-debug-${tag}.apk"
+
+    - name: Store unsigned debug APK as workflow artifact
+      if: env.HAS_SIGNING_SECRETS != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: AnariseVPN-Android-debug-${{ inputs.tag || github.ref_name }}
+        path: AnariseVPN-Android-debug-*.apk
+        retention-days: 14
+
+    - name: Explain unsigned Android build
+      if: env.HAS_SIGNING_SECRETS != 'true'
+      run: echo "No signed Android APK was added to the public release. The debug build is available as a temporary Actions artifact."

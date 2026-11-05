@@ -37,6 +37,9 @@ jobs:
       - name: Run service tests
         run: dotnet run --project tests/LinkParserHarness/LinkParserHarness.csproj --configuration Release -- --service-tests
 
+      - name: Run macOS network recovery checks
+        run: dotnet run --project tests/MacRecoveryHarness/MacRecoveryHarness.csproj --configuration Release
+
       - name: Validate trusted binary manifest
         run: dotnet run --project tests/LinkParserHarness/LinkParserHarness.csproj --configuration Release -- --validate-manifest
 
@@ -77,3 +80,6 @@ jobs:
 
       - name: Build macOS client
         run: dotnet build macos/Anarise.Mac.csproj --configuration Release --nologo
+
+      - name: Run macOS network recovery checks
+        run: dotnet run --project tests/MacRecoveryHarness/MacRecoveryHarness.csproj --configuration Release

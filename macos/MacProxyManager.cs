@@ -24,6 +24,7 @@ public sealed class MacProxySettingsSnapshot
 
 public static class MacProxyManager
 {
+    internal static Func<string, string, bool>? CommandSuccessRunnerOverride { get; set; }
     private static readonly object SyncLock = new();
     private static string? cachedActiveService;
 
@@ -535,6 +536,9 @@ public static class MacProxyManager
 
     private static bool RunCommandSucceeded(string binary, string arguments)
     {
+        if (CommandSuccessRunnerOverride != null)
+            return CommandSuccessRunnerOverride(binary, arguments);
+
         try
         {
             using var proc = new Process

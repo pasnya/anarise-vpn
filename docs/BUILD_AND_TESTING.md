@@ -42,6 +42,14 @@ dotnet run --project tests/LinkParserHarness/LinkParserHarness.csproj --configur
 
 Проверяются HTTPS-адреса и SHA-256 для Xray, Hysteria, Mieru, tun2socks и WinTun.
 
+### Восстановление сети macOS
+
+```bash
+dotnet run --project tests/MacRecoveryHarness/MacRecoveryHarness.csproj --configuration Release
+```
+
+Проверяется восстановление исходных proxy/DNS-настроек и сохранение recovery-файла при неудачном восстановлении. Все системные команды подменяются тестовыми обработчиками.
+
 ### Проверка безопасного хранения
 
 - Windows: `settings.json` и `history.json` шифруются через DPAPI (`CurrentUser`); старые открытые JSON мигрируют при запуске.

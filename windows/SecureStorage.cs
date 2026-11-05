@@ -97,8 +97,13 @@ internal static class SecureStorage
             Directory.CreateDirectory(dir);
         }
 
+        if (OperatingSystem.IsMacOS() && !string.IsNullOrEmpty(dir))
+            File.SetUnixFileMode(dir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+
         var temporaryPath = path + ".part";
         File.WriteAllText(temporaryPath, Protect(content), Encoding.UTF8);
+        if (OperatingSystem.IsMacOS())
+            File.SetUnixFileMode(temporaryPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
         File.Move(temporaryPath, path, true);
     }
 
@@ -108,7 +113,28 @@ internal static class SecureStorage
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".anarise");
         Directory.CreateDirectory(appDir);
+        if (OperatingSystem.IsMacOS())
+            File.SetUnixFileMode(appDir, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         string keyFile = Path.Combine(appDir, ".keystore");
+
+        if (OperatingSystem.IsMacOS())
+        {
+            string? keychainValue = MacKeychainStore.GetPassword();
+            if (keychainValue != null)
+                return DecodeKey(keychainValue, "macOS Keychain");
+
+            if (File.Exists(keyFile))
+            {
+                byte[] legacyKey = DecodeKey(File.ReadAllText(keyFile).Trim(), "legacy key file");
+                string selectedKey = MacKeychainStore.AddPasswordIfAbsent(Convert.ToBase64String(legacyKey));
+                try { File.Delete(keyFile); } catch { }
+                return DecodeKey(selectedKey, "macOS Keychain");
+            }
+
+            byte[] firstKey = RandomNumberGenerator.GetBytes(32);
+            string selected = MacKeychainStore.AddPasswordIfAbsent(Convert.ToBase64String(firstKey));
+            return DecodeKey(selected, "macOS Keychain");
+        }
 
         try
         {
@@ -133,5 +159,17 @@ internal static class SecureStorage
         catch { }
 
         return newKey;
+    }
+
+    private static byte[] DecodeKey(string value, string source)
+    {
+        try
+        {
+            byte[] key = Convert.FromBase64String(value);
+            if (key.Length == 32) return key;
+        }
+        catch (FormatException) { }
+
+        throw new CryptographicException($"The encryption key in {source} is invalid.");
     }
 }
