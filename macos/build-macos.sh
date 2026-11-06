@@ -141,7 +141,10 @@ EOF
 
 if command -v hdiutil >/dev/null 2>&1; then
   echo "Creating DMG image: $DMG_OUTPUT..."
-  hdiutil create -volname "ANARISE VPN" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_OUTPUT"
+  SRC_SIZE_MB=$(du -sm "$DMG_STAGING" | awk '{print $1}')
+  DMG_SIZE_MB=$((SRC_SIZE_MB + 100))
+  echo "Staging size: ${SRC_SIZE_MB}MB, allocated DMG capacity: ${DMG_SIZE_MB}MB..."
+  hdiutil create -size "${DMG_SIZE_MB}m" -volname "ANARISE VPN" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_OUTPUT"
   rm -rf "$DMG_STAGING"
   echo "DMG successfully created: $DMG_OUTPUT"
 else
