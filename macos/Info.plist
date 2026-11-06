@@ -10,8 +10,10 @@
     <string>ANARISE VPN</string>
     <key>CFBundleDisplayName</key>
     <string>ANARISE VPN</string>
-        <key>CFBundlePackageType</key>
+    <key>CFBundlePackageType</key>
     <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
     <key>CFBundleSupportedPlatforms</key>
     <array>
         <string>MacOSX</string>
