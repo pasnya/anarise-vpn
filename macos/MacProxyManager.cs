@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -215,40 +215,43 @@ public static class MacProxyManager
 
         try
         {
+            var cmds = new System.Collections.Generic.List<string>();
             if (enabled)
             {
                 if (enableHttpProxy)
                 {
                     string authArgs = !string.IsNullOrWhiteSpace(username) && !string.IsNullOrEmpty(password)
-                        ? $" on \"{username}\" \"{password}\"" : " off";
-                    RunCommand("/usr/sbin/networksetup", $"-setwebproxy \"{service}\" 127.0.0.1 {httpPort}{authArgs}");
-                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}{authArgs}");
-                    RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" on");
-                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" on");
+                        ? $" on \"{username}\" \"{password}\"" : "";
+                    cmds.Add($"/usr/sbin/networksetup -setwebproxy \"{service}\" 127.0.0.1 {httpPort}{authArgs}");
+                    cmds.Add($"/usr/sbin/networksetup -setsecurewebproxy \"{service}\" 127.0.0.1 {httpPort}{authArgs}");
+                    cmds.Add($"/usr/sbin/networksetup -setwebproxystate \"{service}\" on");
+                    cmds.Add($"/usr/sbin/networksetup -setsecurewebproxystate \"{service}\" on");
                 }
                 else
                 {
-                    RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" off");
-                    RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" off");
+                    cmds.Add($"/usr/sbin/networksetup -setwebproxystate \"{service}\" off");
+                    cmds.Add($"/usr/sbin/networksetup -setsecurewebproxystate \"{service}\" off");
                 }
 
                 string socksAuthArgs = !string.IsNullOrWhiteSpace(username) && !string.IsNullOrEmpty(password)
-                    ? $" on \"{username}\" \"{password}\"" : " off";
-                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}{socksAuthArgs}");
-                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxystate \"{service}\" on");
+                    ? $" on \"{username}\" \"{password}\"" : "";
+                cmds.Add($"/usr/sbin/networksetup -setsocksfirewallproxy \"{service}\" 127.0.0.1 {socksPort}{socksAuthArgs}");
+                cmds.Add($"/usr/sbin/networksetup -setsocksfirewallproxystate \"{service}\" on");
 
                 if (bypassLan)
                 {
-                    RunCommand("/usr/sbin/networksetup", $"-setproxybypassdomains \"{service}\" 127.0.0.1 localhost 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 *.local");
+                    cmds.Add($"/usr/sbin/networksetup -setproxybypassdomains \"{service}\" 127.0.0.1 localhost 192.168.0.0/16 10.0.0.0/8 172.16.0.0/12 *.local");
                 }
             }
             else
             {
-                RunCommand("/usr/sbin/networksetup", $"-setwebproxystate \"{service}\" off");
-                RunCommand("/usr/sbin/networksetup", $"-setsecurewebproxystate \"{service}\" off");
-                RunCommand("/usr/sbin/networksetup", $"-setsocksfirewallproxystate \"{service}\" off");
+                cmds.Add($"/usr/sbin/networksetup -setwebproxystate \"{service}\" off");
+                cmds.Add($"/usr/sbin/networksetup -setsecurewebproxystate \"{service}\" off");
+                cmds.Add($"/usr/sbin/networksetup -setsocksfirewallproxystate \"{service}\" off");
             }
-            return true;
+
+            string combined = string.Join(" && ", cmds);
+            return RunPrivilegedShell(combined);
         }
         catch (Exception ex)
         {
@@ -306,20 +309,31 @@ public static class MacProxyManager
 
             var cmds = new System.Collections.Generic.List<string>
             {
-                $"/sbin/ifconfig {utunName} 10.0.85.1 10.0.85.1 netmask 255.255.255.0 mtu 1350 up"
+                $"/sbin/ifconfig {utunName} 10.0.85.1 10.0.85.2 netmask 255.255.255.0 mtu 1350 up"
             };
 
-            if (!string.IsNullOrWhiteSpace(serverIp) && !string.IsNullOrWhiteSpace(defaultGateway))
+            if (!string.IsNullOrWhiteSpace(serverIp))
             {
                 cmds.Add($"/sbin/route delete -host {serverIp} >/dev/null 2>&1 || true");
-                cmds.Add($"/sbin/route add -host {serverIp} {defaultGateway}");
+                if (!string.IsNullOrWhiteSpace(defaultGateway))
+                {
+                    cmds.Add($"/sbin/route add -host {serverIp} {defaultGateway}");
+                }
+                else
+                {
+                    var (defIface, _) = GetDefaultRouteInfo();
+                    if (!string.IsNullOrWhiteSpace(defIface))
+                    {
+                        cmds.Add($"/sbin/route add -host {serverIp} -interface {defIface}");
+                    }
+                }
             }
 
-            cmds.Add("/sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true");
-            cmds.Add("/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true");
-            cmds.Add("/sbin/route add -net 0.0.0.0/1 10.0.85.1");
-            cmds.Add("/sbin/route add -net 128.0.0.0/1 10.0.85.1");
-            // Switch macOS DNS to public resolvers routed inside the utun85 0.0.0.0/1 tunnel
+            cmds.Add($"/sbin/route delete -net 0.0.0.0/1 -interface {utunName} >/dev/null 2>&1 || /sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true");
+            cmds.Add($"/sbin/route delete -net 128.0.0.0/1 -interface {utunName} >/dev/null 2>&1 || /sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true");
+            cmds.Add($"/sbin/route add -net 0.0.0.0/1 -interface {utunName}");
+            cmds.Add($"/sbin/route add -net 128.0.0.0/1 -interface {utunName}");
+            // Switch macOS DNS to public resolvers routed inside the utun tunnel
             // so queries never bypass the tunnel to the local LAN router (e.g. 192.168.1.1).
             cmds.Add($"/usr/sbin/networksetup -setdnsservers \"{service}\" 1.1.1.1 8.8.8.8");
             cmds.Add("/usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true");
@@ -345,10 +359,11 @@ public static class MacProxyManager
 
             var cmds = new System.Collections.Generic.List<string>
             {
-                "/sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true",
-                "/sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true",
+                "/sbin/route delete -net 0.0.0.0/1 -interface utun85 >/dev/null 2>&1 || /sbin/route delete -net 0.0.0.0/1 >/dev/null 2>&1 || true",
+                "/sbin/route delete -net 128.0.0.0/1 -interface utun85 >/dev/null 2>&1 || /sbin/route delete -net 128.0.0.0/1 >/dev/null 2>&1 || true",
                 $"/usr/sbin/networksetup -setdnsservers \"{service}\" {dnsRestoreArgs} >/dev/null 2>&1 || true",
-                "/usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true"
+                "/usr/bin/dscacheutil -flushcache >/dev/null 2>&1 || true",
+                "/usr/bin/killall -HUP mDNSResponder >/dev/null 2>&1 || true"
             };
 
             if (!string.IsNullOrWhiteSpace(serverIp))

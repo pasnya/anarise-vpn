@@ -670,6 +670,13 @@ namespace Anarise
             rules.Add(new JsonObject
             {
                 ["type"] = "field",
+                ["ip"] = new JsonArray("1.1.1.1", "8.8.8.8"),
+                ["port"] = "53",
+                ["outboundTag"] = "proxy"
+            });
+            rules.Add(new JsonObject
+            {
+                ["type"] = "field",
                 ["port"] = "53",
                 ["outboundTag"] = "dns-out"
             });

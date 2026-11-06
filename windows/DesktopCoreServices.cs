@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -258,6 +258,13 @@ public static class DesktopCoreServices
                     int colonIdx = server.LastIndexOf(':');
                     if (colonIdx > 0) server = server.Substring(0, colonIdx);
                     if (IPAddress.TryParse(server, out _)) return server;
+                    try
+                    {
+                        var addresses = Dns.GetHostAddresses(server);
+                        var ipv4 = addresses.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                        if (ipv4 != null) return ipv4.ToString();
+                    }
+                    catch { }
                     return null;
                 }
             }
@@ -272,6 +279,13 @@ public static class DesktopCoreServices
                     if (!string.IsNullOrEmpty(address))
                     {
                         if (IPAddress.TryParse(address, out _)) return address;
+                        try
+                        {
+                            var addresses = Dns.GetHostAddresses(address);
+                            var ipv4 = addresses.FirstOrDefault(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                            if (ipv4 != null) return ipv4.ToString();
+                        }
+                        catch { }
                         return null;
                     }
                 }
