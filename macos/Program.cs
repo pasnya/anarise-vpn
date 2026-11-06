@@ -24,6 +24,24 @@ public static class Program
     private static PhotinoWindow? window;
     private static readonly MacAppController Controller = new();
 
+    public static string ResolveResourcePath(string relativePath)
+    {
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        string direct = Path.Combine(baseDir, relativePath);
+        if (File.Exists(direct) || Directory.Exists(direct))
+        {
+            return direct;
+        }
+
+        string inResources = Path.GetFullPath(Path.Combine(baseDir, "..", "Resources", relativePath));
+        if (File.Exists(inResources) || Directory.Exists(inResources))
+        {
+            return inResources;
+        }
+
+        return direct;
+    }
+
     [STAThread]
     public static void Main(string[] args)
     {
@@ -32,7 +50,7 @@ public static class Program
 
         MacNetworkStateGuard.RecoverPreviousSessionIfNeeded();
 
-        string wwwroot = Path.Combine(appDir, "wwwroot");
+        string wwwroot = ResolveResourcePath("wwwroot");
 
         window = new PhotinoWindow()
             .SetTitle("ANARISE VPN")
@@ -1019,7 +1037,7 @@ public sealed class MacAppController
             }
 
             PostToUi(new { action = "updateExternalStatus", statusText = "Загрузка свежих списков GitHub..." });
-            string catalogPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "external-sources.json");
+            string catalogPath = Program.ResolveResourcePath("external-sources.json");
             var sources = ExternalSources.Load(catalogPath);
             var loaded = await ExternalSourceLoader.FetchAsync(sources, LogToUi);
             var uniqueLinks = loaded.Links;
@@ -1183,7 +1201,7 @@ public sealed class MacAppController
         TrustedBinaryManifest manifest;
         try
         {
-            manifest = TrustedBinaryManifest.Load(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "trusted-binaries.json"));
+            manifest = TrustedBinaryManifest.Load(Program.ResolveResourcePath("trusted-binaries.json"));
         }
         catch (Exception ex)
         {

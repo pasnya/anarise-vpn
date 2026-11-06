@@ -36,6 +36,16 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 cp "$SCRIPT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp -R "$PUBLISH_DIR/"* "$APP_BUNDLE/Contents/MacOS/"
 
+# Move non-executable assets/resources to Contents/Resources/
+if [ -d "$APP_BUNDLE/Contents/MacOS/wwwroot" ]; then
+  mv "$APP_BUNDLE/Contents/MacOS/wwwroot" "$APP_BUNDLE/Contents/Resources/"
+fi
+for res_file in external-sources.json trusted-binaries.json; do
+  if [ -f "$APP_BUNDLE/Contents/MacOS/$res_file" ]; then
+    mv "$APP_BUNDLE/Contents/MacOS/$res_file" "$APP_BUNDLE/Contents/Resources/"
+  fi
+done
+
 # 3. Create icon if sips and iconutil are available
 LOGO_PNG="$ROOT_DIR/windows/Resources/logo_transparent.png"
 if command -v iconutil >/dev/null 2>&1 && command -v sips >/dev/null 2>&1 && [ -f "$LOGO_PNG" ]; then
@@ -77,17 +87,13 @@ if command -v codesign >/dev/null 2>&1; then
     codesign --force --sign - "$f"
   done
 
-  # 5b. Sign main executable with entitlements and runtime options
+  # 5b. Sign the root application bundle container with entitlements
   ENTITLEMENTS_ARGS=()
   if [ -f "$SCRIPT_DIR/Entitlements.plist" ]; then
     ENTITLEMENTS_ARGS=(--entitlements "$SCRIPT_DIR/Entitlements.plist")
   fi
 
-  echo "Signing main executable Anarise with entitlements..."
-  codesign --force --options runtime "${ENTITLEMENTS_ARGS[@]}" --sign - "$APP_BUNDLE/Contents/MacOS/Anarise"
-
-  # 5c. Sign the root application bundle container
-  echo "Signing root bundle Anarise.app..."
+  echo "Signing root bundle Anarise.app with entitlements and hardened runtime..."
   codesign --force --options runtime "${ENTITLEMENTS_ARGS[@]}" --sign - "$APP_BUNDLE"
 
   echo "Verifying code signature of Anarise.app..."
