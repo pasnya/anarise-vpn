@@ -66,7 +66,7 @@ jobs:
         if ([string]::IsNullOrEmpty($tag)) {
           $tag = $env:GITHUB_REF_NAME
         }
-        $releaseQuery = '.[] | select(.tag_name == "' + $tag + '") | .id'
+        $releaseQuery = '.[] | select(.tag_name == "' + $tag + '" or (.name | contains("' + $tag + '"))) | .id'
         $releaseId = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --jq $releaseQuery | Select-Object -First 1
         if ([string]::IsNullOrWhiteSpace($releaseId)) { throw "Release '$tag' does not exist." }
         $asset = "AnariseVPN-Windows-x64-$tag.zip"

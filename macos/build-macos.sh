@@ -10,23 +10,18 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 PUBLISH_DIR="$SCRIPT_DIR/bin/Release/net8.0/$ARCH/publish"
 APP_BUNDLE="$SCRIPT_DIR/Anarise.app"
 
-# 1. Publish self-contained .NET 8 binary so macOS users do not need .NET installed
+# 1. Publish self-contained single-file .NET 8 binary so macOS users do not need .NET installed
 dotnet publish "$SCRIPT_DIR/Anarise.Mac.csproj" \
   -c Release \
   -r "$ARCH" \
   --self-contained true \
-  -p:PublishSingleFile=false \
+  -p:PublishSingleFile=true \
   -o "$PUBLISH_DIR"
 
-# Fail early if publish silently produced a framework-dependent app. Such a
-# bundle will bounce once in the Dock and exit on Macs without .NET 8 installed.
-for runtime_file in libhostfxr.dylib libhostpolicy.dylib libcoreclr.dylib; do
-  if [ ! -f "$PUBLISH_DIR/$runtime_file" ]; then
-    echo "ERROR: self-contained macOS runtime is incomplete: missing $runtime_file in $PUBLISH_DIR" >&2
-    echo "The app bundle would require a separately installed .NET 8 runtime." >&2
-    exit 1
-  fi
-done
+if [ ! -f "$PUBLISH_DIR/Anarise" ]; then
+  echo "ERROR: self-contained single-file publish failed: missing Anarise executable in $PUBLISH_DIR" >&2
+  exit 1
+fi
 
 # 2. Assemble .app bundle
 rm -rf "$APP_BUNDLE"
@@ -35,6 +30,9 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 
 cp "$SCRIPT_DIR/Info.plist" "$APP_BUNDLE/Contents/Info.plist"
 cp -R "$PUBLISH_DIR/"* "$APP_BUNDLE/Contents/MacOS/"
+
+# Clean up debug symbols from release bundle
+rm -f "$APP_BUNDLE/Contents/MacOS/"*.pdb
 
 # Move non-executable assets/resources to Contents/Resources/
 if [ -d "$APP_BUNDLE/Contents/MacOS/wwwroot" ]; then
@@ -67,34 +65,32 @@ if command -v iconutil >/dev/null 2>&1 && command -v sips >/dev/null 2>&1 && [ -
   rm -rf "$ICONSET"
 fi
 
-# 4. Set correct permissions and clear extended attributes before code signing
-chmod -R a+rX "$APP_BUNDLE"
-chmod +x "$APP_BUNDLE/Contents/MacOS/Anarise"
-if [ -f "$APP_BUNDLE/Contents/MacOS/createdump" ]; then
-  chmod +x "$APP_BUNDLE/Contents/MacOS/createdump"
-fi
+# 4. Set clean permissions: directories 755, files 644, executable 755
+find "$APP_BUNDLE" -type d -exec chmod 755 {} \;
+find "$APP_BUNDLE" -type f -exec chmod 644 {} \;
+chmod 755 "$APP_BUNDLE/Contents/MacOS/Anarise"
 
 if command -v xattr >/dev/null 2>&1; then
   xattr -cr "$APP_BUNDLE" || true
 fi
 
-# 5. Code signing (Inside-Out approach for .NET on macOS)
+# 5. Ad-hoc code signing for macOS Apple Silicon & Intel
 if command -v codesign >/dev/null 2>&1; then
-  echo "Ad-hoc signing Mach-O binaries, dynamic libraries, and .NET assemblies inside bundle..."
+  echo "Ad-hoc signing Mach-O binaries and Anarise.app bundle..."
 
-  # 5a. Sign all dynamic libraries, helpers, and managed .NET assemblies first
-  find "$APP_BUNDLE/Contents/MacOS" -type f \( -name "*.dylib" -o -name "*.so" -o -name "createdump" -o -name "*.dll" \) | while IFS= read -r f; do
-    codesign --force --sign - "$f"
+  # 5a. Sign native dynamic libraries first
+  find "$APP_BUNDLE/Contents/MacOS" -type f \( -name "*.dylib" -o -name "*.so" \) | while IFS= read -r f; do
+    codesign --force --sign - "$f" || true
   done
 
-  # 5b. Sign the root application bundle container with entitlements
+  # 5b. Sign the root application bundle with Entitlements
   ENTITLEMENTS_ARGS=()
   if [ -f "$SCRIPT_DIR/Entitlements.plist" ]; then
     ENTITLEMENTS_ARGS=(--entitlements "$SCRIPT_DIR/Entitlements.plist")
   fi
 
-  echo "Signing root bundle Anarise.app with entitlements and hardened runtime..."
-  codesign --force --options runtime "${ENTITLEMENTS_ARGS[@]}" --sign - "$APP_BUNDLE"
+  echo "Signing root bundle Anarise.app with entitlements..."
+  codesign --force --deep "${ENTITLEMENTS_ARGS[@]}" --sign - "$APP_BUNDLE"
 
   echo "Verifying code signature of Anarise.app..."
   codesign --verify --deep --strict --verbose=2 "$APP_BUNDLE"
@@ -124,7 +120,8 @@ cat > "$DMG_STAGING/КАК ОТКРЫТЬ ANARISE.txt" << 'EOF'
 
 2. ПЕРВЫЙ ЗАПУСК (Защита macOS Gatekeeper):
    Так как ANARISE VPN — бесплатное приложение с открытым исходным кодом без платной подписки Apple Developer,
-   macOS при первом открытии может показать стандартное системное предупреждение.
+   macOS при первом открытии может показать системное окно:
+   «Не удается открыть программу "Anarise.app"» (или предупреждение безопасности).
 
    ЕСТЬ 2 ПРОСТЫХ СПОСОБА ЕГО ОТКРЫТЬ:
 
@@ -132,7 +129,7 @@ cat > "$DMG_STAGING/КАК ОТКРЫТЬ ANARISE.txt" << 'EOF'
    1. Запустите Anarise из папки «Программы». При появлении системного окна нажмите «Готово» (или «Отмена»).
    2. Откройте «Системные настройки» -> «Конфиденциальность и безопасность».
    3. Прокрутите вниз до раздела «Безопасность». Там появится кнопка:
-      «Всё равно открыть» (Open Anyway). Нажмите её и подтвердите паролем.
+      «Всё равно открыть» (Open Anyway). Нажмите её и подтвердите паролем Mac.
 
    СПОСОБ 2 (через Терминал — за 2 секунды):
    Откройте программу «Терминал» и выполните команду:

@@ -76,7 +76,7 @@ jobs:
         if [ -z "$tag" ]; then
           tag="$GITHUB_REF_NAME"
         fi
-        release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\") | .id" | head -n 1)
+        release_id=$(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate --jq ".[] | select(.tag_name == \"$tag\" or (.name | contains(\"$tag\"))) | .id" | head -n 1)
         if [ -z "$release_id" ]; then
           echo "::error::Release '$tag' does not exist."
           exit 1
