@@ -142,7 +142,7 @@ public sealed class MacAppController
     private Task? binariesSetupTask;
     private bool updateChecked;
 
-    private const string AppVersion = "1.4.21";
+    private const string AppVersion = "1.4.22";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;

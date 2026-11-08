@@ -129,24 +129,9 @@ internal static class SecureStorage
             }
             catch { }
 
-            // Try Keychain non-blocking / safe fallback
-            try
-            {
-                string? keychainValue = MacKeychainStore.GetPassword();
-                if (keychainValue != null)
-                {
-                    byte[] kKey = DecodeKey(keychainValue, "macOS Keychain");
-                    try
-                    {
-                        File.WriteAllText(keyFile, Convert.ToBase64String(kKey), Encoding.UTF8);
-                        File.SetUnixFileMode(keyFile, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-                    }
-                    catch { }
-                    return kKey;
-                }
-            }
-            catch { }
-
+            // Do not query macOS Keychain during startup. Security.framework calls can block
+            // while macOS waits for unlock/authorization, which prevents the UI from opening.
+            // The app-local key is protected with user-only file permissions below.
             byte[] macKey = RandomNumberGenerator.GetBytes(32);
             try
             {
@@ -182,15 +167,4 @@ internal static class SecureStorage
         return newKey;
     }
 
-    private static byte[] DecodeKey(string value, string source)
-    {
-        try
-        {
-            byte[] key = Convert.FromBase64String(value);
-            if (key.Length == 32) return key;
-        }
-        catch (FormatException) { }
-
-        throw new CryptographicException($"The encryption key in {source} is invalid.");
-    }
 }
