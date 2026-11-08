@@ -48,8 +48,6 @@ public static class Program
         string appDir = AppDomain.CurrentDomain.BaseDirectory;
         try { Directory.SetCurrentDirectory(appDir); } catch { }
 
-        MacNetworkStateGuard.RecoverPreviousSessionIfNeeded();
-
         string wwwroot = ResolveResourcePath("wwwroot");
 
         window = new PhotinoWindow()
@@ -78,6 +76,10 @@ public static class Program
         {
             window.LoadRawString("<html><body style='background:#111;color:#fff;'><h3>Error: wwwroot/index.html not found</h3></body></html>");
         }
+
+        // Recovery can invoke privileged network tools and wait for macOS authorization.
+        // Keep that work off the startup thread so the window appears immediately.
+        _ = Task.Run(MacNetworkStateGuard.RecoverPreviousSessionIfNeeded);
 
         window.WaitForClose();
     }
