@@ -49,41 +49,62 @@ jobs:
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
 
-    - name: Configure Android release signing
+    - name: Configure and validate Android release signing
       env:
         ANDROID_KEYSTORE_BASE64: ${{ secrets.ANARISE_KEYSTORE_BASE64 }}
         ANARISE_STORE_PASSWORD: ${{ secrets.ANARISE_STORE_PASSWORD }}
         ANARISE_KEY_ALIAS: ${{ secrets.ANARISE_KEY_ALIAS }}
         ANARISE_KEY_PASSWORD: ${{ secrets.ANARISE_KEY_PASSWORD }}
       run: |
-        if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANARISE_STORE_PASSWORD" ] && [ -n "$ANARISE_KEY_ALIAS" ] && [ -n "$ANARISE_KEY_PASSWORD" ]; then
-          keystore_path="$RUNNER_TEMP/anarise-release.jks"
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
-          echo "ANARISE_STORE_FILE=$keystore_path" >> "$GITHUB_ENV"
-          echo "HAS_SIGNING_SECRETS=true" >> "$GITHUB_ENV"
-        else
-          echo "::notice::Signing secrets not configured; falling back to assembleDebug."
-          echo "HAS_SIGNING_SECRETS=false" >> "$GITHUB_ENV"
+        for name in ANDROID_KEYSTORE_BASE64 ANARISE_STORE_PASSWORD ANARISE_KEY_ALIAS ANARISE_KEY_PASSWORD; do
+          if [ -z "${!name}" ]; then
+            echo "::error::Required Android signing secret $name is missing."
+            exit 1
+          fi
+        done
+        keystore_path="$RUNNER_TEMP/anarise-release.p12"
+        printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore_path"
+        actual_fingerprint=$(keytool -list -v -keystore "$keystore_path" -storetype PKCS12 -alias "$ANARISE_KEY_ALIAS" -storepass:env ANARISE_STORE_PASSWORD | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr -d ':' | tr '[:lower:]' '[:upper:]')
+        expected_fingerprint="49D226AA32046EFF916D3DF07F820EE9F95A4AB0DA60B57D05A8B3E6BDB7E6FB"
+        if [ "$actual_fingerprint" != "$expected_fingerprint" ]; then
+          echo "::error::Android release signing certificate changed or is invalid."
+          exit 1
         fi
+        echo "ANARISE_STORE_FILE=$keystore_path" >> "$GITHUB_ENV"
 
     - name: Grant execute permission for gradlew
       run: chmod +x android/gradlew
 
-    - name: Build APK
+    - name: Build signed APK
       working-directory: android
       env:
         ANARISE_STORE_PASSWORD: ${{ secrets.ANARISE_STORE_PASSWORD }}
         ANARISE_KEY_ALIAS: ${{ secrets.ANARISE_KEY_ALIAS }}
         ANARISE_KEY_PASSWORD: ${{ secrets.ANARISE_KEY_PASSWORD }}
       run: |
-        if [ "$HAS_SIGNING_SECRETS" = "true" ]; then
-          ./gradlew assembleRelease
-        else
-          ./gradlew assembleDebug
+        ./gradlew assembleRelease
+
+    - name: Verify APK release certificate
+      run: |
+        sdk_root="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+        if [ -z "$sdk_root" ] || [ ! -d "$sdk_root/build-tools" ]; then
+          echo "::error::Android SDK build-tools were not found."
+          exit 1
+        fi
+        apksigner=$(find "$sdk_root/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)
+        if [ -z "$apksigner" ]; then
+          echo "::error::apksigner was not found in Android SDK build-tools."
+          exit 1
+        fi
+        apk="android/app/build/outputs/apk/release/app-release.apk"
+        actual_fingerprint=$("$apksigner" verify --print-certs "$apk" | sed -n 's/.*certificate SHA-256 digest: //p' | head -n 1 | tr '[:lower:]' '[:upper:]')
+        expected_fingerprint="49D226AA32046EFF916D3DF07F820EE9F95A4AB0DA60B57D05A8B3E6BDB7E6FB"
+        if [ "$actual_fingerprint" != "$expected_fingerprint" ]; then
+          echo "::error::Built APK is not signed with the pinned Android release certificate."
+          exit 1
         fi
 
     - name: Upload signed APK to Release
-      if: env.HAS_SIGNING_SECRETS == 'true'
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         RELEASE_TAG: ${{ inputs.tag }}
@@ -110,24 +131,3 @@ jobs:
           --header "Content-Type: application/octet-stream" \
           --data-binary "@$asset" \
           "https://uploads.github.com/repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset" >/dev/null
-
-    - name: Prepare unsigned debug APK artifact
-      if: env.HAS_SIGNING_SECRETS != 'true'
-      env:
-        RELEASE_TAG: ${{ inputs.tag }}
-      run: |
-        tag="$RELEASE_TAG"
-        if [ -z "$tag" ]; then tag="$GITHUB_REF_NAME"; fi
-        cp android/app/build/outputs/apk/debug/app-debug.apk "AnariseVPN-Android-debug-${tag}.apk"
-
-    - name: Store unsigned debug APK as workflow artifact
-      if: env.HAS_SIGNING_SECRETS != 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: AnariseVPN-Android-debug-${{ inputs.tag || github.ref_name }}
-        path: AnariseVPN-Android-debug-*.apk
-        retention-days: 14
-
-    - name: Explain unsigned Android build
-      if: env.HAS_SIGNING_SECRETS != 'true'
-      run: echo "No signed Android APK was added to the public release. The debug build is available as a temporary Actions artifact."
