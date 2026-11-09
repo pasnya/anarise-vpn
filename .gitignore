@@ -19,6 +19,9 @@ android/.gradle/
 android/build/
 android/local.properties
 android/app/build/
+android/signing/
+*.jks
+*.keystore
 android/temp_vyom_tunnel/vyom-tun-sdk/.cxx/
 android/temp_vyom_tunnel/vyom-tun-sdk/build/
 
