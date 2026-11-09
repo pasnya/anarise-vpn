@@ -75,11 +75,9 @@ android {
     }
 }
 
-tasks.matching { it.name == "validateSigningRelease" }.configureEach {
-    doFirst {
-        check(releaseSigningConfigured) {
-            "Release signing requires ANARISE_STORE_FILE, ANARISE_STORE_PASSWORD, ANARISE_KEY_ALIAS, and ANARISE_KEY_PASSWORD."
-        }
+if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }) {
+    check(releaseSigningConfigured) {
+        "Release signing requires ANARISE_STORE_FILE, ANARISE_STORE_PASSWORD, ANARISE_KEY_ALIAS, and ANARISE_KEY_PASSWORD."
     }
 }
 
