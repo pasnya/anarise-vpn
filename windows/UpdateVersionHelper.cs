@@ -5,7 +5,7 @@ using System.Text.Json.Nodes;
 
 namespace Anarise;
 
-public sealed record UpdateCheckResult(string LatestVersion, string DownloadUrl);
+public sealed record UpdateCheckResult(string LatestVersion, string DownloadUrl, string? Sha256 = null);
 
 public static class UpdateVersionHelper
 {
@@ -111,8 +111,9 @@ public static class UpdateVersionHelper
             releaseNodes.Add(obj);
         }
 
-        JsonNode? bestRelease = null;
         string bestVersion = currentVersion;
+        string bestDownloadUrl = string.Empty;
+        string? bestSha256 = null;
 
         foreach (var rel in releaseNodes)
         {
@@ -125,34 +126,45 @@ public static class UpdateVersionHelper
             if (string.IsNullOrEmpty(tag))
                 continue;
 
+            var asset = SelectAsset(rel, platform);
+            if (asset == null)
+                continue;
+
             if (IsNewerVersion(tag, bestVersion))
             {
                 bestVersion = tag;
-                bestRelease = rel;
+                bestDownloadUrl = asset.Value.Url;
+                bestSha256 = asset.Value.Sha256;
             }
         }
 
-        if (bestRelease == null)
+        if (string.IsNullOrEmpty(bestDownloadUrl))
             return null;
 
-        string downloadUrl = SelectAssetDownloadUrl(bestRelease, platform);
-        return new UpdateCheckResult(bestVersion, downloadUrl);
+        return new UpdateCheckResult(bestVersion, bestDownloadUrl, bestSha256);
     }
 
     public static string SelectAssetDownloadUrl(JsonNode releaseNode, string platform)
     {
-        string fallbackUrl = releaseNode["html_url"]?.ToString() ?? "https://github.com/pasnya/anarise-vpn/releases/latest";
-        var assets = releaseNode["assets"]?.AsArray();
+        return SelectAsset(releaseNode, platform)?.Url ?? string.Empty;
+    }
+
+    private static (string Url, string? Sha256)? SelectAsset(JsonNode bestRelease, string platform)
+    {
+        var assets = bestRelease["assets"]?.AsArray();
         if (assets == null || assets.Count == 0)
-            return fallbackUrl;
+            return null;
 
         var validAssets = assets
             .Where(a => a != null && !string.IsNullOrWhiteSpace(a["name"]?.ToString()) && !string.IsNullOrWhiteSpace(a["browser_download_url"]?.ToString()))
-            .Select(a => (Name: a!["name"]!.ToString(), Url: a["browser_download_url"]!.ToString()))
+            .Select(a => (
+                Name: a!["name"]!.ToString(),
+                Url: a["browser_download_url"]!.ToString(),
+                Sha256: NormalizeSha256(a["digest"]?.ToString())))
             .ToList();
 
         if (validAssets.Count == 0)
-            return fallbackUrl;
+            return null;
 
         if (string.Equals(platform, "macos", StringComparison.OrdinalIgnoreCase))
         {
@@ -160,40 +172,45 @@ public static class UpdateVersionHelper
                 a.Name.Contains("macOS", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.EndsWith(".dmg", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrEmpty(macDmg.Url))
-                return macDmg.Url;
-
-            var macAny = validAssets.FirstOrDefault(a =>
-                a.Name.Contains("macOS", StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(macAny.Url))
-                return macAny.Url;
+                return (macDmg.Url, macDmg.Sha256);
+        }
+        else if (platform.StartsWith("macos-", StringComparison.OrdinalIgnoreCase))
+        {
+            string architecture = platform.EndsWith("arm64", StringComparison.OrdinalIgnoreCase) ? "arm64" : "x64";
+            var matchingMac = validAssets.FirstOrDefault(a =>
+                a.Name.Contains($"macOS-{architecture}-", StringComparison.OrdinalIgnoreCase) &&
+                a.Name.EndsWith(".dmg", StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(matchingMac.Url))
+                return (matchingMac.Url, matchingMac.Sha256);
         }
         else if (string.Equals(platform, "android", StringComparison.OrdinalIgnoreCase))
         {
             var apkAsset = validAssets.FirstOrDefault(a =>
+                a.Name.StartsWith("AnariseVPN-Android-arm64-", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.EndsWith(".apk", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrEmpty(apkAsset.Url))
-                return apkAsset.Url;
+                return (apkAsset.Url, apkAsset.Sha256);
         }
         else
         {
             var winAsset = validAssets.FirstOrDefault(a =>
-                a.Name.Contains("Windows", StringComparison.OrdinalIgnoreCase) &&
+                a.Name.StartsWith("AnariseVPN-Windows-x64-", StringComparison.OrdinalIgnoreCase) &&
                 a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
             if (!string.IsNullOrEmpty(winAsset.Url))
-                return winAsset.Url;
-
-            var winAny = validAssets.FirstOrDefault(a =>
-                a.Name.Contains("Windows", StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(winAny.Url))
-                return winAny.Url;
-
-            var nonMacZip = validAssets.FirstOrDefault(a =>
-                a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) &&
-                !a.Name.Contains("macOS", StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(nonMacZip.Url))
-                return nonMacZip.Url;
+                return (winAsset.Url, winAsset.Sha256);
         }
 
-        return fallbackUrl;
+        return null;
+    }
+
+    private static string? NormalizeSha256(string? digest)
+    {
+        if (string.IsNullOrWhiteSpace(digest))
+            return null;
+        const string prefix = "sha256:";
+        string value = digest.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+            ? digest[prefix.Length..]
+            : digest;
+        return value.Length == 64 && value.All(Uri.IsHexDigit) ? value.ToUpperInvariant() : null;
     }
 }

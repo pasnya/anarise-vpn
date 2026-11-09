@@ -25,6 +25,7 @@
     <Compile Include="..\windows\CoreHealthMonitor.cs" Link="CoreHealthMonitor.cs" />
     <Compile Include="..\windows\TrustedBinaryManifest.cs" Link="TrustedBinaryManifest.cs" />
     <Compile Include="..\windows\UpdateVersionHelper.cs" Link="UpdateVersionHelper.cs" />
+    <Compile Include="..\windows\DesktopUpdateInstaller.cs" Link="DesktopUpdateInstaller.cs" />
     <Compile Include="..\windows\DesktopCoreServices.cs" Link="DesktopCoreServices.cs" />
     <Compile Include="..\windows\SecureStorage.cs" Link="SecureStorage.cs" />
     <Compile Include="..\windows\LocalProxyCredentials.cs" Link="LocalProxyCredentials.cs" />

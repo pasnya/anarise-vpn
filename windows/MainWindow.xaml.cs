@@ -51,7 +51,7 @@ namespace Anarise
         private string proxyPassword = LocalProxyCredentials.Create();
         private bool vpnMode = false;
         private bool systemProxy = true;
-        private const string AppVersion = "1.4.22";
+        private const string AppVersion = "1.4.23";
         private const string RequiredXrayVersion = "26.7.11";
         // Binary downloads can be several dozen megabytes and may be throttled by
         // GitHub/CDN or a corporate proxy. HttpClient's default 100-second timeout
@@ -63,6 +63,8 @@ namespace Anarise
         private CancellationTokenSource? externalScanCts;
         private Task? binariesSetupTask;
         private bool updateChecked;
+        private readonly DesktopUpdateInstaller desktopUpdateInstaller = new();
+        private int updateInstallStarted;
         private NetworkStateGuard networkStateGuard;
         private CancellationTokenSource? reconnectCts;
         private int reconnectAttempts;
@@ -108,6 +110,7 @@ namespace Anarise
             SystemProxyManager.SetKillSwitchBlocked(false);
 
             LoadSettings();
+            systemProxy = !vpnMode;
             LoadHistory();
             SaveSettings();
 
@@ -238,6 +241,10 @@ namespace Anarise
                         StopConnection();
                         break;
 
+                    case "setConnectionMode":
+                        SetConnectionMode(node?["mode"]?.ToString());
+                        break;
+
                     case "checkServerPing":
                         string? linkToPing = node?["link"]?.ToString();
                         if (!string.IsNullOrEmpty(linkToPing))
@@ -304,6 +311,15 @@ namespace Anarise
                             {
                                 LogToUi("Ошибка открытия браузера: " + ex.Message);
                             }
+                        }
+                        break;
+
+                    case "installUpdate":
+                        string? updateUrl = node?["url"]?.ToString();
+                        string? updateSha256 = node?["sha256"]?.ToString();
+                        if (!string.IsNullOrWhiteSpace(updateUrl) && Interlocked.CompareExchange(ref updateInstallStarted, 1, 0) == 0)
+                        {
+                            _ = InstallUpdateAsync(updateUrl, updateSha256);
                         }
                         break;
                 }
@@ -2082,6 +2098,33 @@ namespace Anarise
             SaveSettings();
         }
 
+        private void SetConnectionMode(string? mode)
+        {
+            if (isConnected)
+            {
+                PostToUi(new { action = "showToast", message = "Отключите VPN, чтобы сменить режим" });
+                return;
+            }
+
+            if (string.Equals(mode, "tun", StringComparison.OrdinalIgnoreCase))
+            {
+                vpnMode = true;
+                systemProxy = false;
+            }
+            else if (string.Equals(mode, "systemProxy", StringComparison.OrdinalIgnoreCase))
+            {
+                vpnMode = false;
+                systemProxy = true;
+            }
+            else
+            {
+                return;
+            }
+
+            SaveSettings();
+            PostToUi(new { action = "updateSettings", settings = new { vpnMode, systemProxy } });
+        }
+
         private void UpdateGeoRoutingRules(string value)
         {
             try
@@ -2151,7 +2194,7 @@ namespace Anarise
                             {
                                 await Dispatcher.InvokeAsync(() =>
                                 {
-                                    PostToUi(new { action = "updateAvailable", version = updateResult.LatestVersion, url = updateResult.DownloadUrl });
+                                    PostToUi(new { action = "updateAvailable", version = updateResult.LatestVersion, url = updateResult.DownloadUrl, sha256 = updateResult.Sha256 });
                                 });
                             }
                         }
@@ -2162,6 +2205,27 @@ namespace Anarise
                     Debug.WriteLine("Update check failed: " + ex.Message);
                 }
             });
+        }
+
+        private async Task InstallUpdateAsync(string url, string? sha256)
+        {
+            try
+            {
+                PostToUi(new { action = "updateInstallProgress", message = "Подключение к серверу обновлений…" });
+                await desktopUpdateInstaller.InstallAsync(url, sha256, (percent, message) =>
+                {
+                    PostToUi(new { action = "updateInstallProgress", message = $"{message} ({percent}%)" });
+                });
+                PostToUi(new { action = "updateInstallStarting", message = "Установщик запущен. Приложение сейчас перезапустится…" });
+                await Task.Delay(300);
+                await Dispatcher.InvokeAsync(() => Application.Current?.Shutdown());
+            }
+            catch (Exception ex)
+            {
+                Interlocked.Exchange(ref updateInstallStarted, 0);
+                LogToUi("Не удалось установить обновление: " + ex.Message);
+                PostToUi(new { action = "updateInstallFailed", message = "Не удалось установить обновление: " + ex.Message });
+            }
         }
 
         // --- WEBVIEW2 COMMUNICATION UTILS ---

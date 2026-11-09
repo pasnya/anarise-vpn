@@ -67,6 +67,29 @@
                 <span id="server-count" style="display:none;">0</span>
             </section>
 
+            <section class="connection-mode-control" aria-label="Режим подключения">
+                <div class="connection-mode-heading">
+                    <span>Режим подключения</span>
+                    <span id="connection-mode-note" class="connection-mode-note">Изменение применяется при следующем подключении</span>
+                </div>
+                <div class="connection-mode-options" role="group" aria-label="Выберите режим подключения">
+                    <button id="mode-tun" class="connection-mode-option" type="button" aria-pressed="false" aria-describedby="mode-tun-tooltip">
+                        <span class="mode-option-copy">
+                            <strong>TUN</strong>
+                            <span>Весь трафик</span>
+                        </span>
+                        <span class="mode-option-tooltip" id="mode-tun-tooltip" role="tooltip">TUN создаёт виртуальный сетевой адаптер и направляет системный трафик через VPN. Подходит для приложений без поддержки прокси; может потребоваться разрешение администратора.</span>
+                    </button>
+                    <button id="mode-system-proxy" class="connection-mode-option" type="button" aria-pressed="false" aria-describedby="mode-system-proxy-tooltip">
+                        <span class="mode-option-copy">
+                            <strong>Системный прокси</strong>
+                            <span>Приложения с поддержкой прокси</span>
+                        </span>
+                        <span class="mode-option-tooltip" id="mode-system-proxy-tooltip" role="tooltip">Режим меняет системные настройки прокси. Через VPN идут приложения, которые используют системный прокси; остальные могут подключаться напрямую.</span>
+                    </button>
+                </div>
+            </section>
+
             <!-- Large Circular Power Button -->
             <div class="connect-button-container">
                 <button id="btn-connect" class="connect-btn" title="Включить / Отключить VPN" aria-label="Переключить VPN">
@@ -228,30 +251,6 @@
             </header>
 
             <div class="settings-list">
-                <div class="settings-section-title">Режим подключения</div>
-
-                <div class="setting-card">
-                    <div class="setting-info">
-                        <span class="setting-title">VPN-туннель (TUN)</span>
-                        <span class="setting-desc">Направлять весь системный трафик через VPN. Требуются права администратора</span>
-                    </div>
-                    <div class="toggle-switch">
-                        <input type="checkbox" id="chk-vpn-mode">
-                        <label for="chk-vpn-mode"></label>
-                    </div>
-                </div>
-
-                <div class="setting-card" id="card-system-proxy">
-                    <div class="setting-info">
-                        <span class="setting-title">Системный прокси</span>
-                        <span class="setting-desc">Автоматически настраивать системный прокси при подключении</span>
-                    </div>
-                    <div class="toggle-switch">
-                        <input type="checkbox" id="chk-system-proxy" checked>
-                        <label for="chk-system-proxy"></label>
-                    </div>
-                </div>
-
                 <div class="settings-section-title">Порты прокси</div>
 
                 <div class="setting-card">
@@ -410,7 +409,7 @@
                 <p class="dialog-desc" id="update-dialog-text">Доступна новая версия приложения. Хотите скачать её?</p>
                 <div class="dialog-actions">
                     <button id="btn-update-cancel" class="dialog-btn text-btn">Отмена</button>
-                    <button id="btn-update-download" class="dialog-btn fill-btn">Скачать</button>
+                    <button id="btn-update-download" class="dialog-btn fill-btn">Скачать и установить</button>
                 </div>
             </div>
         </div>

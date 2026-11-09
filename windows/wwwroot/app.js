@@ -266,7 +266,16 @@ function handleHostMessage(msg) {
             showToast(msg.message);
             break;
         case 'updateAvailable':
-            showUpdateDialog(msg.version, msg.url);
+            showUpdateDialog(msg.version, msg.url, msg.sha256);
+            break;
+        case 'updateInstallProgress':
+            updateInstallStatus(msg.message || 'Подготовка обновления…', true);
+            break;
+        case 'updateInstallFailed':
+            updateInstallStatus(msg.message || 'Не удалось установить обновление. Попробуйте ещё раз.', false, true);
+            break;
+        case 'updateInstallStarting':
+            updateInstallStatus(msg.message || 'Приложение перезапустится после установки.', true);
             break;
     }
 }
@@ -380,20 +389,12 @@ document.addEventListener('DOMContentLoaded', () => {
         sendToHost('saveSetting', { name: 'bypassLan', value: chk.checked });
     });
 
-    // System proxy toggle
-    document.getElementById('chk-system-proxy').addEventListener('change', (e) => {
-        sendToHost('saveSetting', { name: 'systemProxy', value: e.target.checked });
-    });
     document.getElementById('chk-proxy-auth').addEventListener('change', (e) => {
         sendToHost('saveSetting', { name: 'proxyAuthEnabled', value: e.target.checked });
     });
 
-    // VPN mode toggle
-    document.getElementById('chk-vpn-mode').addEventListener('change', (e) => {
-        sendToHost('saveSetting', { name: 'vpnMode', value: e.target.checked });
-        // Visually indicate system proxy is disabled when VPN mode is on
-        updateVpnModeUi(e.target.checked);
-    });
+    document.getElementById('mode-tun').addEventListener('click', () => selectConnectionMode('tun'));
+    document.getElementById('mode-system-proxy').addEventListener('click', () => selectConnectionMode('systemProxy'));
 
     // Port inputs (save on blur to avoid excessive messages)
     document.getElementById('input-socks-port').addEventListener('change', (e) => {
@@ -520,32 +521,45 @@ function closeImportDialog() {
     dialog.classList.add('hidden');
 }
 
-function showUpdateDialog(version, url) {
-    if (!version) return;
+function showUpdateDialog(version, url, sha256) {
+    if (!version || !url) return;
     try {
         const dismissed = localStorage.getItem('dismissedUpdateVersion');
         if (dismissed === version) return;
     } catch (e) {}
 
     appState.pendingUpdateVersion = version;
+    appState.pendingUpdateSha256 = sha256 || null;
     const dialog = document.getElementById('dialog-update');
     if (dialog) {
-        document.getElementById('update-dialog-text').innerText = `Доступна новая версия приложения: v${version}. Хотите скачать её?`;
+        document.getElementById('update-dialog-text').innerText = `Доступна новая версия приложения: v${version}. Скачать и установить её сейчас?`;
+        updateInstallStatus(`Доступна новая версия приложения: v${version}. Скачать и установить её сейчас?`, false);
         
         const downloadBtn = document.getElementById('btn-update-download');
         const newDownloadBtn = downloadBtn.cloneNode(true);
         downloadBtn.parentNode.replaceChild(newDownloadBtn, downloadBtn);
         
         newDownloadBtn.addEventListener('click', () => {
-            try {
-                localStorage.setItem('dismissedUpdateVersion', version);
-            } catch (e) {}
-            sendToHost('openBrowser', { url: url });
-            dialog.classList.add('hidden');
+            newDownloadBtn.disabled = true;
+            newDownloadBtn.innerText = 'Подготовка…';
+            updateInstallStatus('Подключение к серверу обновлений…', true);
+            sendToHost('installUpdate', { url, version, sha256: appState.pendingUpdateSha256 });
         });
         
         dialog.classList.remove('hidden');
     }
+}
+
+function updateInstallStatus(message, inProgress, allowRetry = false) {
+    const text = document.getElementById('update-dialog-text');
+    const button = document.getElementById('btn-update-download');
+    if (text) text.innerText = message;
+    if (button) {
+        button.disabled = inProgress;
+        button.innerText = inProgress ? 'Установка…' : allowRetry ? 'Повторить' : 'Скачать и установить';
+    }
+    const cancelButton = document.getElementById('btn-update-cancel');
+    if (cancelButton) cancelButton.disabled = inProgress;
 }
 
 // --- CONNECTION MANAGER ---
@@ -570,6 +584,7 @@ function setConnectBtnText(text) {
 
 function updateVpnState(state) {
     appState.vpnState = state;
+    updateConnectionModeUi();
     const label = document.getElementById('status-label');
     const btn = document.getElementById('btn-connect');
     const headline = document.getElementById('zen-status-headline');
@@ -704,8 +719,6 @@ function syncSettingsUi() {
     document.getElementById('chk-autostart').checked = appState.settings.autostart;
     document.getElementById('chk-autoreconnect').checked = appState.settings.autoreconnect;
     document.getElementById('chk-bypass-lan').checked = appState.settings.bypassLan;
-    document.getElementById('chk-vpn-mode').checked = appState.settings.vpnMode;
-    document.getElementById('chk-system-proxy').checked = appState.settings.systemProxy !== false;
     document.getElementById('input-socks-port').value = appState.settings.socksPort || 20808;
     document.getElementById('input-http-port').value = appState.settings.httpPort || 20809;
     document.getElementById('chk-proxy-auth').checked = appState.settings.proxyAuthEnabled !== false;
@@ -714,19 +727,40 @@ function syncSettingsUi() {
     document.getElementById('input-geo-routing-rules').value = appState.settings.geoRoutingRules || '';
     updateGeoRuleChoices();
     renderGeoRulesList();
-    updateVpnModeUi(appState.settings.vpnMode);
+    updateConnectionModeUi();
 }
 
-function updateVpnModeUi(isVpn) {
-    const proxyCard = document.getElementById('card-system-proxy');
-    const proxyCheckbox = document.getElementById('chk-system-proxy');
-    if (proxyCard) {
-        proxyCard.style.opacity = isVpn ? '0.4' : '1';
-        proxyCard.style.pointerEvents = isVpn ? 'none' : 'auto';
+function selectConnectionMode(mode) {
+    if (appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING') {
+        showToast('Отключите VPN, чтобы сменить режим');
+        return;
     }
-    if (proxyCheckbox) {
-        proxyCheckbox.disabled = isVpn;
-    }
+    const vpnMode = mode === 'tun';
+    const systemProxy = mode === 'systemProxy';
+    if (!vpnMode && !systemProxy) return;
+    if (appState.settings.vpnMode === vpnMode && appState.settings.systemProxy === systemProxy) return;
+
+    appState.settings.vpnMode = vpnMode;
+    appState.settings.systemProxy = systemProxy;
+    updateConnectionModeUi();
+    sendToHost('setConnectionMode', { mode });
+}
+
+function updateConnectionModeUi() {
+    const tunButton = document.getElementById('mode-tun');
+    const proxyButton = document.getElementById('mode-system-proxy');
+    const note = document.getElementById('connection-mode-note');
+    if (!tunButton || !proxyButton) return;
+
+    const busy = appState.vpnState === 'CONNECTED' || appState.vpnState === 'CONNECTING';
+    const tunSelected = appState.settings.vpnMode === true;
+    tunButton.setAttribute('aria-pressed', String(tunSelected));
+    proxyButton.setAttribute('aria-pressed', String(!tunSelected));
+    tunButton.disabled = busy;
+    proxyButton.disabled = busy;
+    if (note) note.innerText = busy
+        ? 'Отключите VPN, чтобы сменить режим'
+        : 'Выбор применяется при следующем подключении';
 }
 
 // --- RENDER LISTS ---

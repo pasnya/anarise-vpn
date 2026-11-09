@@ -143,8 +143,10 @@ public sealed class MacAppController
     private System.Threading.Timer? statsTimer;
     private Task? binariesSetupTask;
     private bool updateChecked;
+    private readonly DesktopUpdateInstaller desktopUpdateInstaller = new();
+    private int updateInstallStarted;
 
-    private const string AppVersion = "1.4.22";
+    private const string AppVersion = "1.4.23";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
@@ -165,6 +167,7 @@ public sealed class MacAppController
         KillOrphanedProcesses();
         CleanupRuntimeConfigFiles();
         LoadSettings();
+        systemProxy = !vpnMode;
         LoadHistory();
         SaveSettings();
     }
@@ -209,6 +212,10 @@ public sealed class MacAppController
 
                 case "disconnect":
                     Disconnect(preserveKillSwitch: false);
+                    break;
+
+                case "setConnectionMode":
+                    SetConnectionMode(node?["mode"]?.ToString());
                     break;
 
                 case "selectConfig":
@@ -291,6 +298,15 @@ public sealed class MacAppController
                         {
                             LogToUi("Ошибка открытия браузера: " + ex.Message);
                         }
+                    }
+                    break;
+
+                case "installUpdate":
+                    string? updateUrl = node?["url"]?.ToString();
+                    string? updateSha256 = node?["sha256"]?.ToString();
+                    if (!string.IsNullOrWhiteSpace(updateUrl) && Interlocked.CompareExchange(ref updateInstallStarted, 1, 0) == 0)
+                    {
+                        _ = InstallUpdateAsync(updateUrl, updateSha256);
                     }
                     break;
             }
@@ -1421,10 +1437,11 @@ public sealed class MacAppController
                 if (response.IsSuccessStatusCode)
                 {
                     string jsonString = await response.Content.ReadAsStringAsync();
-                    var updateResult = UpdateVersionHelper.FindNewerRelease(jsonString, AppVersion, "macos");
+                    string platform = RuntimeInformation.ProcessArchitecture == Architecture.Arm64 ? "macos-arm64" : "macos-x64";
+                    var updateResult = UpdateVersionHelper.FindNewerRelease(jsonString, AppVersion, platform);
                     if (updateResult != null)
                     {
-                        PostToUi(new { action = "updateAvailable", version = updateResult.LatestVersion, url = updateResult.DownloadUrl });
+                        PostToUi(new { action = "updateAvailable", version = updateResult.LatestVersion, url = updateResult.DownloadUrl, sha256 = updateResult.Sha256 });
                     }
                 }
             }
@@ -1462,6 +1479,28 @@ public sealed class MacAppController
         {
             LogToUi("Ошибка проверки локальных портов: " + ex.Message);
             return false;
+        }
+    }
+
+    private async Task InstallUpdateAsync(string url, string? sha256)
+    {
+        try
+        {
+            PostToUi(new { action = "updateInstallProgress", message = "Подключение к серверу обновлений…" });
+            await desktopUpdateInstaller.InstallAsync(url, sha256, (percent, message) =>
+            {
+                PostToUi(new { action = "updateInstallProgress", message = $"{message} ({percent}%)" });
+            });
+            PostToUi(new { action = "updateInstallStarting", message = "Установщик запущен. Приложение сейчас перезапустится…" });
+            await Task.Delay(300);
+            OnClosing();
+            Environment.Exit(0);
+        }
+        catch (Exception ex)
+        {
+            Interlocked.Exchange(ref updateInstallStarted, 0);
+            LogToUi("Не удалось установить обновление: " + ex.Message);
+            PostToUi(new { action = "updateInstallFailed", message = "Не удалось установить обновление: " + ex.Message });
         }
     }
 
@@ -1573,6 +1612,33 @@ public sealed class MacAppController
                 break;
         }
         SaveSettings();
+    }
+
+    private void SetConnectionMode(string? mode)
+    {
+        if (isConnected || currentState == "CONNECTING")
+        {
+            PostToUi(new { action = "showToast", message = "Отключите VPN, чтобы сменить режим" });
+            return;
+        }
+
+        if (string.Equals(mode, "tun", StringComparison.OrdinalIgnoreCase))
+        {
+            vpnMode = true;
+            systemProxy = false;
+        }
+        else if (string.Equals(mode, "systemProxy", StringComparison.OrdinalIgnoreCase))
+        {
+            vpnMode = false;
+            systemProxy = true;
+        }
+        else
+        {
+            return;
+        }
+
+        SaveSettings();
+        PostToUi(new { action = "updateSettings", settings = new { vpnMode, systemProxy } });
     }
 
     private void LoadSettings()

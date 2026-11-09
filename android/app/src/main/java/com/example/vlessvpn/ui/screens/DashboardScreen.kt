@@ -1,6 +1,10 @@
 ﻿package com.example.vlessvpn.ui.screens
 
 import android.app.Activity
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -26,6 +30,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.example.vlessvpn.MainViewModel
 import com.example.vlessvpn.R
 import com.example.vlessvpn.ui.components.ExitIpCard
@@ -91,19 +96,20 @@ fun DashboardScreen(
     }
 
     var showImportDialog by remember { mutableStateOf(false) }
-    var updateInfo by remember { mutableStateOf<Pair<String, String>?>(null) }
+    var updateInfo by remember { mutableStateOf<com.example.vlessvpn.AppUpdateOffer?>(null) }
+    val updateDownload by viewModel.updateDownloadState.collectAsState()
     val currentVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.4.19"
+            pInfo.versionName ?: "1.4.23"
         } catch (e: Exception) {
             "1.1.0"
         }
     }
 
     LaunchedEffect(Unit) {
-        viewModel.checkForUpdates(currentVersion) { version, url ->
-            updateInfo = Pair(version, url)
+        viewModel.checkForUpdates(currentVersion) { offer ->
+            updateInfo = offer
         }
     }
 
@@ -118,34 +124,67 @@ fun DashboardScreen(
     }
 
     if (updateInfo != null) {
-        val pendingVersion = updateInfo!!.first
-        val pendingUrl = updateInfo!!.second
+        val pendingUpdate = updateInfo!!
         AlertDialog(
             onDismissRequest = {
-                viewModel.dismissUpdateVersion(pendingVersion)
-                updateInfo = null
+                if (!updateDownload.isDownloading) {
+                    viewModel.dismissUpdateVersion(pendingUpdate.version)
+                    viewModel.resetUpdateDownloadState()
+                    updateInfo = null
+                }
             },
             title = { Text("Доступно обновление") },
-            text = { Text("Доступна новая версия приложения: v$pendingVersion. Хотите скачать её?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        updateDownload.error
+                            ?: if (updateDownload.isDownloading) updateDownload.message
+                            else "Доступна новая версия приложения: v${pendingUpdate.version}. Скачайте и установите её прямо здесь."
+                    )
+                    if (updateDownload.isDownloading) {
+                        LinearProgressIndicator(progress = { updateDownload.progress / 100f }, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            },
             confirmButton = {
                 Button(
+                    enabled = !updateDownload.isDownloading,
                     onClick = {
-                        viewModel.dismissUpdateVersion(pendingVersion)
-                        val intent = android.content.Intent(
-                            android.content.Intent.ACTION_VIEW,
-                            android.net.Uri.parse(pendingUrl)
-                        )
-                        context.startActivity(intent)
-                        updateInfo = null
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !context.packageManager.canRequestPackageInstalls()) {
+                            try {
+                                context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
+                                Toast.makeText(context, "Разрешите ANARISE устанавливать приложения, затем вернитесь и нажмите кнопку ещё раз", Toast.LENGTH_LONG).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Разрешите установку приложений из ANARISE в настройках Android", Toast.LENGTH_LONG).show()
+                            }
+                            return@Button
+                        }
+                        viewModel.downloadUpdate(pendingUpdate) { apkFile ->
+                            try {
+                                val apkUri = FileProvider.getUriForFile(context, "${context.packageName}.updates", apkFile)
+                                val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                                    data = apkUri
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                context.startActivity(installIntent)
+                                viewModel.resetUpdateDownloadState()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Не удалось открыть установщик Android: ${e.message}", Toast.LENGTH_LONG).show()
+                            }
+                        }
                     }
                 ) {
-                    Text("Скачать")
+                    Text(if (updateDownload.error != null) "Повторить" else if (updateDownload.isDownloading) "Загрузка…" else "Скачать и установить")
                 }
             },
             dismissButton = {
                 TextButton(onClick = {
-                    viewModel.dismissUpdateVersion(pendingVersion)
-                    updateInfo = null
+                    if (!updateDownload.isDownloading) {
+                        viewModel.dismissUpdateVersion(pendingUpdate.version)
+                        viewModel.resetUpdateDownloadState()
+                        updateInfo = null
+                    }
                 }) {
                     Text("Позже")
                 }
@@ -324,6 +363,74 @@ fun DashboardScreen(
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+
+        item {
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Android uses the OS VPNService TUN route; system proxy is not an Android app mode.
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                shape = RoundedCornerShape(22.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.68f),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.32f))
+            ) {
+                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Режим подключения",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "На Android доступен системный VPN-туннель",
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TooltipBox(
+                            positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                            tooltip = {
+                                PlainTooltip {
+                                    Text("TUN создаёт виртуальный сетевой интерфейс и проводит трафик через VPNService Android. Системный прокси меняет настройки прокси устройства и работает только в приложениях, которые их используют; этот режим в Android-версии не поддерживается.")
+                                }
+                            },
+                            state = rememberTooltipState()
+                        ) {
+                            IconButton(onClick = {}) {
+                                Text("i", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.09f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.34f))
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                Text("TUN", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                                Text("Активный режим", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Surface(
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.28f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.22f))
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
+                                Text("Системный прокси", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.68f))
+                                Text("Не поддерживается", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.64f))
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         item {

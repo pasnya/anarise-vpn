@@ -22,6 +22,8 @@
 *   📂 [windows](windows) — Десктопный клиент под Windows (.NET 8.0 WPF, WebView2 HTML/CSS/JS frontend, управление ядрами Xray-core, Hysteria2 и Mieru).
 *   📂 [macos](macos) — Десктопный клиент под macOS (.NET 8.0, WebKit/WKWebView, системный прокси через `networksetup`, Kill Switch через `pfctl`, DMG-образы с установкой в Applications).
 
+Обновление установленного приложения из интерфейса описано в [документации обновлений](docs/IN_APP_UPDATES.md).
+
 ---
 
 ## Клиент Android (/android)

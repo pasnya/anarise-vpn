@@ -16,6 +16,19 @@ import com.example.vlessvpn.data.ExternalSources
 import io.github.vyomtunnel.sdk.models.TrafficProbeResult
 import io.github.vyomtunnel.sdk.models.TrafficProbeStatus
 import kotlinx.coroutines.sync.withLock
+import java.io.File
+import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.security.MessageDigest
+
+data class AppUpdateOffer(val version: String, val downloadUrl: String, val sha256: String?)
+data class AppUpdateDownloadState(
+    val isDownloading: Boolean = false,
+    val progress: Int = 0,
+    val message: String = "",
+    val error: String? = null
+)
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -379,8 +392,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private fun parseSubscriptionContent(content: String): List<String> = ExternalSources.parse(content)
 
     private var updateChecked = false
+    private val _updateDownloadState = MutableStateFlow(AppUpdateDownloadState())
+    val updateDownloadState: StateFlow<AppUpdateDownloadState> = _updateDownloadState.asStateFlow()
+    private var updateDownloadJob: Job? = null
 
-    fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (String, String) -> Unit) {
+    fun checkForUpdates(currentVersion: String, onNewVersionAvailable: (AppUpdateOffer) -> Unit) {
         if (updateChecked) return
         updateChecked = true
 
@@ -398,39 +414,42 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     val dismissedVersion = updatePrefs.getString("dismissed_update_version", null)
 
                     var bestVersion = normalizeVersionTag(currentVersion)
-                    var bestRelease: org.json.JSONObject? = null
+                    var bestOffer: AppUpdateOffer? = null
 
                     for (i in 0 until releasesArray.length()) {
                         val rel = releasesArray.optJSONObject(i) ?: continue
                         if (rel.optBoolean("draft", false) || rel.optBoolean("prerelease", false)) continue
                         val tag = normalizeVersionTag(rel.optString("tag_name", ""))
-                        if (tag.isNotEmpty() && isNewerVersion(tag, bestVersion)) {
-                            bestVersion = tag
-                            bestRelease = rel
-                        }
-                    }
-
-                    if (bestRelease != null && bestVersion != dismissedVersion) {
-                        val assets = bestRelease.optJSONArray("assets")
-                        var downloadUrl = bestRelease.optString("html_url", "https://github.com/pasnya/anarise-vpn/releases/latest")
+                        if (tag.isEmpty() || !isNewerVersion(tag, bestVersion)) continue
+                        val assets = rel.optJSONArray("assets") ?: continue
+                        var downloadUrl: String? = null
+                        var sha256: String? = null
                         if (assets != null && assets.length() > 0) {
-                            var apkUrl: String? = null
                             for (j in 0 until assets.length()) {
                                 val asset = assets.optJSONObject(j) ?: continue
                                 val assetName = asset.optString("name", "")
                                 val browserUrl = asset.optString("browser_download_url", "")
-                                if (assetName.endsWith(".apk", ignoreCase = true) && browserUrl.isNotEmpty()) {
-                                    apkUrl = browserUrl
+                                if (assetName.startsWith("AnariseVPN-Android-arm64-", ignoreCase = true) &&
+                                    assetName.endsWith(".apk", ignoreCase = true) && browserUrl.isNotEmpty()) {
+                                    downloadUrl = browserUrl
+                                    val digest = asset.optString("digest", "")
+                                    sha256 = digest.removePrefix("sha256:").takeIf {
+                                        it.length == 64 && it.all { char -> char.isDigit() || char.lowercaseChar() in 'a'..'f' }
+                                    }
                                     break
                                 }
                             }
-                            if (apkUrl != null) {
-                                downloadUrl = apkUrl
-                            }
                         }
+                        if (!downloadUrl.isNullOrEmpty()) {
+                            bestVersion = tag
+                            bestOffer = AppUpdateOffer(tag, downloadUrl, sha256)
+                        }
+                    }
 
+                    val selectedOffer = bestOffer
+                    if (selectedOffer != null && selectedOffer.version != dismissedVersion) {
                         withContext(Dispatchers.Main) {
-                            onNewVersionAvailable(bestVersion, downloadUrl)
+                            onNewVersionAvailable(selectedOffer)
                         }
                     }
                 }
@@ -442,6 +461,91 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissUpdateVersion(version: String) {
         updatePrefs.edit().putString("dismissed_update_version", normalizeVersionTag(version)).apply()
+    }
+
+    fun downloadUpdate(offer: AppUpdateOffer, onDownloaded: (File) -> Unit) {
+        if (updateDownloadJob?.isActive == true) return
+        _updateDownloadState.value = AppUpdateDownloadState(isDownloading = true, message = "Подключение к серверу обновлений…")
+        updateDownloadJob = viewModelScope.launch(Dispatchers.IO) {
+            var connection: HttpURLConnection? = null
+            var partialFile: File? = null
+            try {
+                val source = URL(offer.downloadUrl)
+                require(source.protocol.equals("https", ignoreCase = true) && source.host.equals("github.com", ignoreCase = true)) {
+                    "Ссылка на обновление не прошла проверку безопасности."
+                }
+                val httpConnection = (source.openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 15_000
+                    readTimeout = 60_000
+                    instanceFollowRedirects = true
+                    requestMethod = "GET"
+                    setRequestProperty("User-Agent", "ANARISE-VPN-Android-Updater")
+                }
+                connection = httpConnection
+                httpConnection.connect()
+                require(httpConnection.responseCode in 200..299) { "Сервер обновлений вернул ошибку ${httpConnection.responseCode}." }
+                val finalUrl = httpConnection.url
+                require(finalUrl.protocol.equals("https", ignoreCase = true) &&
+                    (finalUrl.host.equals("github.com", ignoreCase = true) || finalUrl.host.endsWith(".githubusercontent.com", ignoreCase = true))) {
+                    "Сервер загрузки обновления не прошёл проверку."
+                }
+                val maxBytes = 300L * 1024 * 1024
+                val contentLength = httpConnection.contentLengthLong
+                require(contentLength <= 0 || contentLength <= maxBytes) { "Размер файла обновления превышает допустимый предел." }
+
+                val updateDir = File(getApplication<Application>().cacheDir, "updates").apply { mkdirs() }
+                updateDir.listFiles()?.filter { it.name.startsWith("anarise-update-") }?.forEach { it.delete() }
+                val fileName = "anarise-update-${normalizeVersionTag(offer.version)}.apk"
+                val apkFile = File(updateDir, fileName)
+                val tempFile = File(updateDir, "$fileName.part")
+                partialFile = tempFile
+                val digest = MessageDigest.getInstance("SHA-256")
+                var downloaded = 0L
+                httpConnection.inputStream.use { input ->
+                    FileOutputStream(tempFile).use { output ->
+                        val buffer = ByteArray(128 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            downloaded += count
+                            require(downloaded <= maxBytes) { "Размер файла обновления превышает допустимый предел." }
+                            output.write(buffer, 0, count)
+                            digest.update(buffer, 0, count)
+                            val progress = if (contentLength > 0) ((downloaded * 100 / contentLength).toInt()).coerceIn(0, 99) else 0
+                            withContext(Dispatchers.Main) {
+                                _updateDownloadState.value = AppUpdateDownloadState(
+                                    isDownloading = true,
+                                    progress = progress,
+                                    message = if (contentLength > 0) "Загружено ${downloaded / 1024 / 1024} из ${contentLength / 1024 / 1024} МБ…"
+                                    else "Загружено ${downloaded / 1024 / 1024} МБ…"
+                                )
+                            }
+                        }
+                    }
+                }
+                if (!offer.sha256.isNullOrBlank()) {
+                    val actual = digest.digest().joinToString("") { "%02x".format(it) }
+                    require(actual.equals(offer.sha256, ignoreCase = true)) { "Контрольная сумма APK не совпала." }
+                }
+                if (apkFile.exists()) apkFile.delete()
+                check(tempFile.renameTo(apkFile)) { "Не удалось сохранить загруженный APK." }
+                withContext(Dispatchers.Main) {
+                    _updateDownloadState.value = AppUpdateDownloadState()
+                    onDownloaded(apkFile)
+                }
+            } catch (e: Exception) {
+                partialFile?.delete()
+                withContext(Dispatchers.Main) {
+                    _updateDownloadState.value = AppUpdateDownloadState(error = e.message ?: "Не удалось загрузить обновление.")
+                }
+            } finally {
+                connection?.disconnect()
+            }
+        }
+    }
+
+    fun resetUpdateDownloadState() {
+        _updateDownloadState.value = AppUpdateDownloadState()
     }
 
     private val _externalConfigs = MutableStateFlow<List<Pair<String, Long>>>(emptyList())
