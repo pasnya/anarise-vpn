@@ -146,7 +146,7 @@ public sealed class MacAppController
     private readonly DesktopUpdateInstaller desktopUpdateInstaller = new();
     private int updateInstallStarted;
 
-    private const string AppVersion = "1.4.23";
+    private const string AppVersion = "1.4.24";
     private const string RequiredXrayVersion = "26.7.11";
     private const int ExternalConfigBatchSize = 200;
     private const int ExternalTrafficBatchSize = 30;
