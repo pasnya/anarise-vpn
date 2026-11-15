@@ -19,6 +19,14 @@ class VyomBootReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent?) {
+        try {
+            handleBoot(context, intent)
+        } catch (e: Throwable) {
+            Log.e(TAG, "Auto-start on boot failed", e)
+        }
+    }
+
+    private fun handleBoot(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         if (!BOOT_ACTIONS.contains(action)) return
 

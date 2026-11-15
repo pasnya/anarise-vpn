@@ -34,14 +34,16 @@ fun SplitTunnelingScreen(
     val context = LocalContext.current
     val packageManager = context.packageManager
 
+    // Enumerating installed apps touches every package's label; one broken package
+    // must not abort composition.
     val appsState = produceState<List<AppInfo>>(initialValue = emptyList()) {
         value = withContext(Dispatchers.IO) {
-            getInstalledApps(context)
+            runCatching { getInstalledApps(context) }.getOrDefault(emptyList())
         }
     }
 
     var excludedApps by remember {
-        mutableStateOf(VyomVpnManager.getExcludedApps(context).toSet())
+        mutableStateOf(runCatching { VyomVpnManager.getExcludedApps(context).toSet() }.getOrDefault(emptySet()))
     }
 
     var searchQuery by remember { mutableStateOf("") }
@@ -134,10 +136,12 @@ private fun getInstalledApps(context: Context): List<AppInfo> {
     val apps = pm.getInstalledApplications(android.content.pm.PackageManager.GET_META_DATA)
     val list = mutableListOf<AppInfo>()
     for (app in apps) {
-        val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
-        if (launchIntent != null || (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) {
-            val label = app.loadLabel(pm).toString()
-            list.add(AppInfo(label, app.packageName))
+        runCatching {
+            val launchIntent = pm.getLaunchIntentForPackage(app.packageName)
+            if (launchIntent != null || (app.flags and android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0) {
+                val label = app.loadLabel(pm).toString()
+                list.add(AppInfo(label, app.packageName))
+            }
         }
     }
     return list.sortedBy { it.label.lowercase() }

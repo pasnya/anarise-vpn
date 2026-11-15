@@ -166,27 +166,38 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     init {
-        VyomVpnManager.initialize(application)
-        VyomVpnManager.registerListener(application, listener)
+        // The ViewModel is built while the first frame is composed: a failure in any
+        // of this (native engine, keystore, preferences) must degrade, not crash.
+        try {
+            VyomVpnManager.initialize(application)
+            VyomVpnManager.registerListener(application, listener)
 
-        // Load initial state
-        _killSwitchEnabled.value = VyomVpnManager.isKillSwitchEnabled(application)
-        _autoStartEnabled.value = VyomVpnManager.isAutoStartEnabled(application)
-        _autoReconnectEnabled.value = VyomVpnManager.isAutoReconnectEnabled(application)
-        loadHistory()
+            // Load initial state
+            _killSwitchEnabled.value = VyomVpnManager.isKillSwitchEnabled(application)
+            _autoStartEnabled.value = VyomVpnManager.isAutoStartEnabled(application)
+            _autoReconnectEnabled.value = VyomVpnManager.isAutoReconnectEnabled(application)
+            loadHistory()
 
-        // Populate Vless link from latest history item if available
-        val history = ConfigHistoryManager.getHistory(application)
-        if (history.isNotEmpty()) {
-            _vlessLink.value = history.first()
-        }
+            // Populate Vless link from latest history item if available
+            val history = ConfigHistoryManager.getHistory(application)
+            if (history.isNotEmpty()) {
+                _vlessLink.value = history.first()
+            }
 
-        // Sync initial state if already connected
-        val currentState = VyomVpnManager.currentState
-        _vpnState.value = currentState
-        if (currentState == VyomState.CONNECTED) {
-            startTimer()
-            fetchExitIp()
+            // Sync initial state if already connected. The service runs in its own
+            // process, so a UI process that started mid-session has no state of its
+            // own; fall back to what the system reports about the VPN transport.
+            val currentState = if (VyomVpnManager.currentState == VyomState.CONNECTED ||
+                (VyomVpnManager.wasVpnRunning(application) && VyomVpnManager.isTunnelActive(application))
+            ) VyomState.CONNECTED else VyomVpnManager.currentState
+            _vpnState.value = currentState
+            if (currentState == VyomState.CONNECTED) {
+                startTimer()
+                fetchExitIp()
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("MainViewModel", "Startup failed", e)
+            _logs.update { it + "Ошибка инициализации: ${e.message ?: e.javaClass.simpleName}" }
         }
     }
 
@@ -230,10 +241,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun connect(activity: android.app.Activity) {
         val link = _vlessLink.value
-        if (link.isNotBlank()) {
+        if (link.isBlank()) return
+        // Called straight from a click handler: nothing below may reach the main thread
+        // as an uncaught throwable.
+        try {
             VyomVpnManager.connectWithPermission(activity, link)
             ConfigHistoryManager.saveConfigToHistory(activity, link)
             loadHistory()
+        } catch (e: Throwable) {
+            _logs.update { (it + "Ошибка подключения: ${e.message ?: e.javaClass.simpleName}").takeLast(500) }
+            android.widget.Toast.makeText(activity, "Не удалось подключиться: ${e.message ?: e.javaClass.simpleName}", android.widget.Toast.LENGTH_LONG).show()
         }
     }
 

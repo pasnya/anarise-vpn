@@ -21,11 +21,14 @@ object VyomLogger {
         broadcast(context, "ERROR: $message ${throwable?.message ?: ""}")
     }
 
+    /** Logging is called from catch blocks, so it must never throw itself. */
     private fun broadcast(context: Context, message: String) {
-        val intent = Intent(VyomVpnManager.ACTION_SDK_LOGS).apply {
-            putExtra("MSG", message)
-            setPackage(context.packageName)
+        runCatching {
+            val intent = Intent(VyomVpnManager.ACTION_SDK_LOGS).apply {
+                putExtra("MSG", message)
+                setPackage(context.packageName)
+            }
+            context.sendBroadcast(intent, "${context.packageName}.permission.INTERNAL_VPN_EVENTS")
         }
-        context.sendBroadcast(intent, "${context.packageName}.permission.INTERNAL_VPN_EVENTS")
     }
 }

@@ -101,7 +101,7 @@ fun DashboardScreen(
     val currentVersion = remember {
         try {
             val pInfo = context.packageManager.getPackageInfo(context.packageName, 0)
-            pInfo.versionName ?: "1.4.24"
+            pInfo.versionName ?: "1.4.25"
         } catch (e: Exception) {
             "1.1.0"
         }
@@ -556,6 +556,7 @@ fun DashboardScreen(
                 // Button 1: Paste from Clipboard
                 Button(
                     onClick = {
+                      try {
                         val clipboardText = clipboard.getText()?.text
                         if (!clipboardText.isNullOrBlank()) {
                             val trimmed = clipboardText.trim()
@@ -576,6 +577,9 @@ fun DashboardScreen(
                         } else {
                             Toast.makeText(context, "Буфер обмена пуст", Toast.LENGTH_SHORT).show()
                         }
+                      } catch (e: Throwable) {
+                        Toast.makeText(context, "Не удалось добавить конфигурацию: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                      }
                     },
                     modifier = Modifier
                         .weight(1f)
@@ -597,12 +601,20 @@ fun DashboardScreen(
                     Text("Вставить", fontSize = 13.sp)
                 }
 
-                // Button 2: Scan QR Code
-                val scanner = remember { GmsBarcodeScanning.getClient(context) }
+                // Button 2: Scan QR Code.
+                // The ML Kit client needs Google Play services; on a device without
+                // them (or with them disabled) creating it throws, so a failure leaves
+                // the button in place and only reports itself when tapped.
+                val scanner = remember { runCatching { GmsBarcodeScanning.getClient(context) }.getOrNull() }
                 Button(
                     onClick = {
+                        if (scanner == null) {
+                            Toast.makeText(context, "Сканер QR недоступен: нужны сервисы Google Play", Toast.LENGTH_LONG).show()
+                            return@Button
+                        }
                         scanner.startScan()
                             .addOnSuccessListener { barcode ->
+                              try {
                                 val rawValue = barcode.rawValue
                                 if (!rawValue.isNullOrBlank()) {
                                     val trimmed = rawValue.trim()
@@ -621,6 +633,9 @@ fun DashboardScreen(
                                         Toast.makeText(context, "Неподдерживаемый формат QR-кода", Toast.LENGTH_SHORT).show()
                                     }
                                 }
+                              } catch (e: Throwable) {
+                                Toast.makeText(context, "Не удалось добавить конфигурацию: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+                              }
                             }
                             .addOnFailureListener { e ->
                                 Toast.makeText(context, "Ошибка сканирования: ${e.message}", Toast.LENGTH_SHORT).show()

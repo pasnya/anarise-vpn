@@ -17,20 +17,34 @@ class VpnTileService : TileService() {
         override fun onLogReceived(message: String) {}
     }
 
+    // A quick-settings tile runs inside SystemUI's binder calls: anything thrown here
+    // is reported as an app crash, so both callbacks are guarded.
     override fun onStartListening() {
         super.onStartListening()
-        VyomVpnManager.initialize(applicationContext)
-        VyomVpnManager.registerListener(applicationContext, vpnListener)
-        updateTileState(VyomVpnManager.currentState)
+        try {
+            VyomVpnManager.initialize(applicationContext)
+            VyomVpnManager.registerListener(applicationContext, vpnListener)
+            updateTileState(VyomVpnManager.currentState)
+        } catch (e: Throwable) {
+            android.util.Log.e("VpnTileService", "Tile setup failed", e)
+        }
     }
 
     override fun onStopListening() {
         super.onStopListening()
-        VyomVpnManager.unregisterListener(applicationContext, vpnListener)
+        runCatching { VyomVpnManager.unregisterListener(applicationContext, vpnListener) }
     }
 
     override fun onClick() {
         super.onClick()
+        try {
+            handleClick()
+        } catch (e: Throwable) {
+            android.util.Log.e("VpnTileService", "Tile click failed", e)
+        }
+    }
+
+    private fun handleClick() {
         val state = VyomVpnManager.currentState
         if (state == VyomState.CONNECTED) {
             VyomVpnManager.stop(applicationContext)

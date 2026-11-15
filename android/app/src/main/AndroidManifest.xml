@@ -4,6 +4,11 @@
     <permission
         android:name="${applicationId}.permission.INTERNAL_VPN_EVENTS"
         android:protectionLevel="signature" />
+    <!-- Declaring a permission does not grant it. Without this uses-permission the
+         VPN service (which runs in :xray_process) cannot deliver its state, traffic
+         and log broadcasts to the UI process, so the screen stays on "Отключено"
+         even while the tunnel is up. -->
+    <uses-permission android:name="${applicationId}.permission.INTERNAL_VPN_EVENTS" />
 
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />

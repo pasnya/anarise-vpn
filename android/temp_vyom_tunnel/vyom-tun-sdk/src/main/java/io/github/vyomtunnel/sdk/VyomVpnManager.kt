@@ -87,14 +87,17 @@ object VyomVpnManager {
             }
         }
 
+        // Asset copying, native loading and preference access all have device-specific
+        // failure modes (no free space, stripped ABI, locked storage). None of them may
+        // take the whole app down, so every Throwable is reported and swallowed here.
         try {
             AssetUtils.copyAssets(context)
             System.loadLibrary("xray")
             System.loadLibrary("vyom-v2ray")
             loadSavedExclusions(context)
             isInitialized = true
-        } catch (e: UnsatisfiedLinkError) {
-            VyomLogger.e(context, "Native libraries failed to load", e)
+        } catch (e: Throwable) {
+            VyomLogger.e(context, "VPN engine initialization failed", e)
         }
     }
 
@@ -111,70 +114,98 @@ object VyomVpnManager {
 
             start(context, finalConfig)
             null // Success
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             e.message ?: "Unknown error"
         }
     }
 
+    /**
+     * Entry point for the UI. Everything it touches — link parsing, the native
+     * validator (which can throw UnsatisfiedLinkError, not an Exception), the keystore
+     * and starting an activity or service — can fail on a real device, so the whole
+     * body is guarded: the user gets a message instead of a crash.
+     */
     fun connectWithPermission(activity: Activity, input: String) {
-        val finalConfig = try {
-            if (input.trim().startsWith("{")) input
-            else LinkParser.parse(input)
-        } catch (e: Exception) {
-            Toast.makeText(activity, "Invalid link or JSON", Toast.LENGTH_LONG).show()
-            return
-        }
+        try {
+            val finalConfig = try {
+                if (input.trim().startsWith("{")) input
+                else LinkParser.parse(input)
+            } catch (e: Throwable) {
+                Toast.makeText(activity, "Некорректная ссылка или JSON", Toast.LENGTH_LONG).show()
+                return
+            }
 
-        val validationError = validateConfig(activity, finalConfig)
-        if (validationError != null) {
-            Toast.makeText(activity, validationError, Toast.LENGTH_LONG).show()
-            VyomLogger.e(activity, "Config validation failed: $validationError", null)
-            return
-        }
+            val validationError = validateConfig(activity, finalConfig)
+            if (validationError != null) {
+                Toast.makeText(activity, validationError, Toast.LENGTH_LONG).show()
+                VyomLogger.e(activity, "Config validation failed: $validationError", null)
+                return
+            }
 
-        val vpnIntent = VpnService.prepare(activity)
+            val vpnIntent = VpnService.prepare(activity)
 
-        val hasNotificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
-        if (vpnIntent != null || !hasNotificationPermission) {
-            saveConfig(activity, finalConfig)
-            activity.startActivity(
-                Intent(activity, VyomPermissionActivity::class.java)
-            )
-        } else {
-            start(activity, finalConfig)
+            val hasNotificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                activity.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            } else {
+                true
+            }
+            if (vpnIntent != null || !hasNotificationPermission) {
+                saveConfig(activity, finalConfig)
+                activity.startActivity(
+                    Intent(activity, VyomPermissionActivity::class.java)
+                )
+            } else {
+                start(activity, finalConfig)
+            }
+        } catch (e: Throwable) {
+            VyomLogger.e(activity, "Connect failed", e)
+            runCatching {
+                Toast.makeText(activity, "Не удалось подключиться: ${e.message ?: e.javaClass.simpleName}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
+    /**
+     * Starts the VPN service. Callers include the quick-settings tile and the boot
+     * receiver, where a foreground-service start can be rejected by the system; such a
+     * refusal is reported as an ERROR state rather than crashing the caller.
+     */
     fun start(context: Context, configJson: String) {
-        saveConfig(context, configJson)
-        setVpnShouldRun(context, true)
+        try {
+            saveConfig(context, configJson)
+            setVpnShouldRun(context, true)
 
-        val intent = Intent(context, VyomVpnService::class.java).apply {
-            action = "START_VPN"
-            putExtra(VyomVpnService.EXTRA_CONFIG, configJson)
-            putExtra(VyomVpnService.NOTIF_TITLE, notificationConfig.title)
-            putExtra(VyomVpnService.NOTIF_CONTENT, notificationConfig.content)
-            putExtra(VyomVpnService.NOTIF_ICON, notificationConfig.iconResId ?: 0)
-            putExtra(VyomVpnService.NOTIF_CHANNEL, notificationConfig.channelName)
-        }
+            val intent = Intent(context, VyomVpnService::class.java).apply {
+                action = "START_VPN"
+                putExtra(VyomVpnService.EXTRA_CONFIG, configJson)
+                putExtra(VyomVpnService.NOTIF_TITLE, notificationConfig.title)
+                putExtra(VyomVpnService.NOTIF_CONTENT, notificationConfig.content)
+                putExtra(VyomVpnService.NOTIF_ICON, notificationConfig.iconResId ?: 0)
+                putExtra(VyomVpnService.NOTIF_CHANNEL, notificationConfig.channelName)
+            }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.startForegroundService(intent)
-        } else {
-            context.startService(intent)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+        } catch (e: Throwable) {
+            VyomLogger.e(context, "Failed to start the VPN service", e)
+            currentState = VyomState.ERROR
+            vpnListeners.forEach { runCatching { it.onStateChanged(VyomState.ERROR) } }
         }
     }
 
     fun stop(context: Context) {
-        setVpnShouldRun(context, false)
-        val intent = Intent(context, VyomVpnService::class.java).apply {
-            action = "STOP_VPN"
+        try {
+            setVpnShouldRun(context, false)
+            val intent = Intent(context, VyomVpnService::class.java).apply {
+                action = "STOP_VPN"
+            }
+            context.startService(intent)
+        } catch (e: Throwable) {
+            VyomLogger.e(context, "Failed to stop the VPN service", e)
         }
-        context.startService(intent)
     }
 
     fun validateConfig(context: Context, config: String): String? {
@@ -209,7 +240,14 @@ object VyomVpnManager {
             }
         }
         val assetPath = context.filesDir.absolutePath
-        return NativeEngine.validateConfig(config, assetPath)
+        // The validator is a JNI call: a missing or mismatched .so throws
+        // UnsatisfiedLinkError, which is an Error and would escape a plain catch.
+        return try {
+            NativeEngine.validateConfig(config, assetPath)
+        } catch (e: Throwable) {
+            VyomLogger.e(context, "Native config validation failed", e)
+            "Движок VPN недоступен на этом устройстве"
+        }
     }
 
     /**
@@ -338,22 +376,29 @@ object VyomVpnManager {
         if (internalReceiver != null) return
 
         internalReceiver = object : BroadcastReceiver() {
+            // A receiver runs on the main thread: anything thrown here kills the app,
+            // so an unknown state name or a misbehaving listener is contained.
             override fun onReceive(context: Context?, intent: Intent?) {
-                when (intent?.action) {
-                    ACTION_VPN_STATE -> {
-                        val stateName = intent.getStringExtra("STATE") ?: return
-                        currentState = VyomState.valueOf(stateName)
-                        vpnListeners.forEach { it.onStateChanged(currentState) }
+                try {
+                    when (intent?.action) {
+                        ACTION_VPN_STATE -> {
+                            val stateName = intent.getStringExtra("STATE") ?: return
+                            val state = VyomState.entries.firstOrNull { it.name == stateName } ?: return
+                            currentState = state
+                            vpnListeners.forEach { runCatching { it.onStateChanged(state) } }
+                        }
+                        ACTION_VPN_TRAFFIC -> {
+                            val up = intent.getLongExtra("UP", 0L)
+                            val down = intent.getLongExtra("DOWN", 0L)
+                            vpnListeners.forEach { runCatching { it.onTrafficUpdate(up, down) } }
+                        }
+                        ACTION_SDK_LOGS -> {
+                            val msg = intent.getStringExtra("MSG") ?: ""
+                            vpnListeners.forEach { runCatching { it.onLogReceived(msg) } }
+                        }
                     }
-                    ACTION_VPN_TRAFFIC -> {
-                        val up = intent.getLongExtra("UP", 0L)
-                        val down = intent.getLongExtra("DOWN", 0L)
-                        vpnListeners.forEach { it.onTrafficUpdate(up, down) }
-                    }
-                    ACTION_SDK_LOGS -> {
-                        val msg = intent.getStringExtra("MSG") ?: ""
-                        vpnListeners.forEach { it.onLogReceived(msg) }
-                    }
+                } catch (e: Throwable) {
+                    Log.e(TAG, "Failed to handle ${intent?.action}", e)
                 }
             }
         }
@@ -366,16 +411,23 @@ object VyomVpnManager {
 
         val senderPermission = "${context.packageName}.permission.INTERNAL_VPN_EVENTS"
         val appContext = context.applicationContext
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            appContext.registerReceiver(
-                internalReceiver,
-                filter,
-                senderPermission,
-                null,
-                Context.RECEIVER_NOT_EXPORTED
-            )
-        } else {
-            appContext.registerReceiver(internalReceiver, filter, senderPermission, null)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                appContext.registerReceiver(
+                    internalReceiver,
+                    filter,
+                    senderPermission,
+                    null,
+                    Context.RECEIVER_NOT_EXPORTED
+                )
+            } else {
+                appContext.registerReceiver(internalReceiver, filter, senderPermission, null)
+            }
+        } catch (e: Throwable) {
+            // Without the receiver the UI stops getting state updates, but the app
+            // keeps working; a registration failure is not worth a crash.
+            Log.e(TAG, "Failed to register the VPN event receiver", e)
+            internalReceiver = null
         }
     }
 
@@ -484,6 +536,22 @@ object VyomVpnManager {
 
     fun isPermissionGranted(context: Context): Boolean {
         return android.net.VpnService.prepare(context) == null
+    }
+
+    /**
+     * True when the system reports an active VPN transport. The service lives in its
+     * own process and announces state over broadcasts; if the UI process starts (or
+     * restarts) mid-session it has missed them, so this asks the OS directly.
+     */
+    fun isTunnelActive(context: Context): Boolean = try {
+        val manager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+        manager.allNetworks.any { network ->
+            manager.getNetworkCapabilities(network)
+                ?.hasTransport(android.net.NetworkCapabilities.TRANSPORT_VPN) == true
+        }
+    } catch (e: Throwable) {
+        Log.e(TAG, "Failed to read the VPN transport state", e)
+        false
     }
 
     fun setAutoStartEnabled(context: Context, enabled: Boolean) {

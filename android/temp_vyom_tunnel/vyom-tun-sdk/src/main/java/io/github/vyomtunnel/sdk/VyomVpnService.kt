@@ -56,8 +56,18 @@ class VyomVpnService : TProxyService() {
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        // Connectivity callbacks run on a system-managed thread; a throw here would
+        // take the service process down on every network change.
         override fun onAvailable(network: Network) {
             super.onAvailable(network)
+            try {
+                handleNetworkAvailable()
+            } catch (e: Throwable) {
+                VyomLogger.e(this@VyomVpnService, "Reconnect after a network change failed", e)
+            }
+        }
+
+        private fun handleNetworkAvailable() {
             if (!VyomVpnManager.isAutoReconnectEnabled(this@VyomVpnService)) {
                 VyomLogger.i(this@VyomVpnService, "Auto-reconnect disabled by user")
                 return
@@ -90,14 +100,25 @@ class VyomVpnService : TProxyService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        setupForegroundService(intent)
+        // Promoting to foreground can be refused by the system (missing notification
+        // permission, background start limits). That must not kill the service.
+        try {
+            setupForegroundService(intent)
+        } catch (e: Throwable) {
+            VyomLogger.e(this, "Failed to start in the foreground", e)
+        }
 
-        when (intent?.action) {
-            "START_VPN" -> {
-                val config = intent.getStringExtra(EXTRA_CONFIG) ?: ""
-                startVpn(config)
+        try {
+            when (intent?.action) {
+                "START_VPN" -> {
+                    val config = intent.getStringExtra(EXTRA_CONFIG) ?: ""
+                    startVpn(config)
+                }
+                "STOP_VPN" -> stopVpn()
             }
-            "STOP_VPN" -> stopVpn()
+        } catch (e: Throwable) {
+            VyomLogger.e(this, "Failed to handle ${intent?.action}", e)
+            notifyStatus(VyomState.ERROR)
         }
         return START_STICKY
     }
@@ -130,6 +151,7 @@ class VyomVpnService : TProxyService() {
                 HysteriaEngine.stop()
                 MieruEngine.stop()
                 TProxyStopService()
+                closeTun()
                 Thread.sleep(500)
 
                 // Parse Mieru config and resolve server hostname via DoH
@@ -210,9 +232,11 @@ class VyomVpnService : TProxyService() {
                 notifyStatus(VyomState.CONNECTED)
                 VyomLogger.i(this, "=== VPN CONNECTED (Mieru) ===")
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
+                // Throwable, not Exception: a missing native engine raises
+                // UnsatisfiedLinkError, and an uncaught one on this thread kills the app.
                 VyomLogger.e(this, "VPN START FAILED (Mieru)", e)
-                MieruEngine.stop()
+                runCatching { MieruEngine.stop() }
                 notifyStatus(VyomState.ERROR)
             }
         }
@@ -232,6 +256,7 @@ class VyomVpnService : TProxyService() {
                 NativeEngine.stopXray()
                 HysteriaEngine.stop()
                 TProxyStopService()
+                closeTun()
                 Thread.sleep(500)
 
                 // Parse Hysteria2 config and resolve server hostname via DoH
@@ -316,9 +341,9 @@ class VyomVpnService : TProxyService() {
                 notifyStatus(VyomState.CONNECTED)
                 VyomLogger.i(this, "=== VPN CONNECTED (Hysteria2) ===")
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 VyomLogger.e(this, "VPN START FAILED (Hysteria2)", e)
-                HysteriaEngine.stop()
+                runCatching { HysteriaEngine.stop() }
                 notifyStatus(VyomState.ERROR)
             }
         }
@@ -337,6 +362,7 @@ class VyomVpnService : TProxyService() {
             try {
                 NativeEngine.stopXray()
                 TProxyStopService()
+                closeTun()
                 Thread.sleep(500)
 
                 NativeEngine.initNative(this)
@@ -398,11 +424,20 @@ class VyomVpnService : TProxyService() {
                 notifyStatus(VyomState.CONNECTED)
                 VyomLogger.i(this, "=== VPN CONNECTED ===")
 
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 VyomLogger.e(this, "VPN START FAILED", e)
                 notifyStatus(VyomState.ERROR)
             }
         }
+    }
+
+    /**
+     * Releases the previous TUN descriptor. Without this a restart leaves the old
+     * interface behind (visible as a second, dead tunN device) and leaks its fd.
+     */
+    private fun closeTun() {
+        runCatching { tunInterface?.close() }
+        tunInterface = null
     }
 
     private fun waitForSocks5(port: Int, timeoutMs: Long): Boolean {
@@ -427,8 +462,7 @@ class VyomVpnService : TProxyService() {
         thread(start = true, name = "VyomShutdownThread") {
             try {
                 stopStatsTicker()
-                tunInterface?.close()
-                tunInterface = null
+                closeTun()
 
                 this@VyomVpnService.TProxyStopService()
                 NativeEngine.stopXray()
@@ -437,10 +471,10 @@ class VyomVpnService : TProxyService() {
 
                 notifyStatus(VyomState.DISCONNECTED)
                 stopSelf()
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 VyomLogger.e(this, "Vpn stop crash", e)
                 notifyStatus(VyomState.DISCONNECTED)
-                stopSelf()
+                runCatching { stopSelf() }
             }
         }
     }
@@ -449,19 +483,25 @@ class VyomVpnService : TProxyService() {
         statsTimer?.cancel()
         statsTimer = Timer()
         statsTimer?.scheduleAtFixedRate(object : TimerTask() {
+            // An exception thrown inside a TimerTask kills the timer thread and the
+            // process with it, so the native stats call is guarded.
             override fun run() {
-                val stats = this@VyomVpnService.TProxyGetStats()
-                if (stats.size >= 4) {
-                    val currentUp = stats[1]
-                    val currentDown = stats[3]
+                try {
+                    val stats = this@VyomVpnService.TProxyGetStats()
+                    if (stats.size >= 4) {
+                        val currentUp = stats[1]
+                        val currentDown = stats[3]
 
-                    val speedUp = if (lastUp > 0) currentUp - lastUp else 0
-                    val speedDown = if (lastDown > 0) currentDown - lastDown else 0
+                        val speedUp = if (lastUp > 0) currentUp - lastUp else 0
+                        val speedDown = if (lastDown > 0) currentDown - lastDown else 0
 
-                    lastUp = currentUp
-                    lastDown = currentDown
+                        lastUp = currentUp
+                        lastDown = currentDown
 
-                    notifyTraffic(speedUp, speedDown)
+                        notifyTraffic(speedUp, speedDown)
+                    }
+                } catch (e: Throwable) {
+                    VyomLogger.e(this@VyomVpnService, "Traffic stats tick failed", e)
                 }
             }
         }, 0L, 1000L)
@@ -521,10 +561,14 @@ class VyomVpnService : TProxyService() {
     override fun onCreate() {
         super.onCreate()
         NativeEngine.vpnService = this
-        val request = NetworkRequest.Builder()
-            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            .build()
-        connectivityManager.registerNetworkCallback(request, networkCallback)
+        try {
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            connectivityManager.registerNetworkCallback(request, networkCallback)
+        } catch (e: Throwable) {
+            VyomLogger.e(this, "Failed to watch network changes", e)
+        }
     }
 
     override fun onDestroy() {

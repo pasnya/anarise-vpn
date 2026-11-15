@@ -29,18 +29,25 @@ class VyomPermissionActivity : AppCompatActivity() {
         }
     }
 
+    // This activity is opened to ask for permissions; a failure here should close it
+    // quietly instead of crashing the app.
     private fun requestVpnPermission() {
-        val intent = VpnService.prepare(this)
-        if (intent != null) {
-            requestVpn.launch(intent)
-        } else {
-            startVpnIfConfigExists()
+        try {
+            val intent = VpnService.prepare(this)
+            if (intent != null) {
+                requestVpn.launch(intent)
+            } else {
+                startVpnIfConfigExists()
+                finish()
+            }
+        } catch (e: Throwable) {
+            android.util.Log.e("VyomPermission", "VPN permission request failed", e)
             finish()
         }
     }
 
     private fun startVpnIfConfigExists() {
-        val lastConfig = VyomVpnManager.getLastConfig(this)
+        val lastConfig = runCatching { VyomVpnManager.getLastConfig(this) }.getOrNull()
         if (lastConfig != null) {
             VyomVpnManager.start(this, lastConfig)
         }
